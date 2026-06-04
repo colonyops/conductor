@@ -4,6 +4,8 @@ export type EventHandler<E extends CoreEventName> = (
   payload: CoreEventPayload<E>,
 ) => Promise<void>;
 
+const HANDLER_TIMEOUT_MS = 30_000;
+
 export class EventBus {
   private handlers = new Map<string, EventHandler<CoreEventName>[]>();
 
@@ -24,6 +26,26 @@ export class EventBus {
     payload: CoreEventPayload<E>,
   ): Promise<void> {
     const list = this.handlers.get(event) ?? [];
-    await Promise.all(list.map((h) => h(payload)));
+    for (const h of list) {
+      try {
+        await Promise.race([
+          (h as EventHandler<E>)(payload),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(`handler timeout after ${HANDLER_TIMEOUT_MS}ms`),
+                ),
+              HANDLER_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      } catch (err) {
+        console.error(
+          `EventBus: handler error for "${event}":`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
   }
 }
