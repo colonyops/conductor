@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { loadConfig, resolvePath } from "./config.js";
+import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
 import { EventBus } from "./core/events.js";
 import {
   CONDUCTOR_DATA_DIR,
@@ -9,8 +9,12 @@ import {
   writeIpcEvent,
 } from "./core/ipc.js";
 import { SessionManager } from "./core/session.js";
+import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
+import type { PluginRegistration } from "./plugins/loader.js";
 import { createConcurrencyLimiter } from "./sdk/concurrency.js";
+import { openKVDatabase } from "./sdk/kv.js";
 import { createLogger } from "./sdk/logger.js";
+import { createSecretsClient } from "./sdk/secrets.js";
 import type { IpcSignal, SessionEvent } from "./types.js";
 
 const program = new Command("conductor")
@@ -25,18 +29,31 @@ program
   .action(async (opts: { config?: string }) => {
     try {
       const config = loadConfig(opts.config);
+      const configPath = resolveConfigPath(opts.config);
       const logger = createLogger({
         pluginName: "conductor",
         logPath: resolvePath(config.observability.logPath),
         logMaxBytes: config.observability.logMaxBytes,
         logMaxBackups: config.observability.logMaxBackups,
       });
+      const kvDatabase = openKVDatabase(CONDUCTOR_DATA_DIR);
+      const secrets = createSecretsClient();
       const eventBus = new EventBus();
       const globalLimiter = createConcurrencyLimiter(config.concurrency.global);
       const sessionManager = new SessionManager({
         config,
         eventBus,
         globalLimiter,
+      });
+
+      const registrations = await loadPlugins({
+        config,
+        configPath,
+        sessionManager,
+        eventBus,
+        kvDatabase,
+        secrets,
+        globalLogger: logger,
       });
 
       const watcher = watchIpcEvents(async (ipcEvent) => {
@@ -53,7 +70,14 @@ program
         if (shuttingDown) return;
         shuttingDown = true;
         process.exitCode = 0;
-        shutdown(sessionManager, watcher, eventBus, logger)
+        shutdown(
+          registrations,
+          sessionManager,
+          watcher,
+          kvDatabase,
+          eventBus,
+          logger,
+        )
           .catch((err) => {
             logger.error("Shutdown error", {
               error: err instanceof Error ? err.message : String(err),
@@ -67,11 +91,10 @@ program
 
       await eventBus.emit("conductorStart", {});
       logger.info("Conductor started", {
-        pluginCount: 0,
+        pluginCount: registrations.length,
         dataDir: CONDUCTOR_DATA_DIR,
       });
 
-      // Plugin loading is Phase 4; hold the process open
       await new Promise<never>(() => {});
     } catch (e) {
       console.error(e instanceof Error ? e.message : String(e));
@@ -80,14 +103,18 @@ program
   });
 
 async function shutdown(
+  registrations: PluginRegistration[],
   sessionManager: SessionManager,
   watcher: { stop(): void },
+  kvDatabase: ReturnType<typeof openKVDatabase>,
   eventBus: EventBus,
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
   await eventBus.emit("conductorStop", {});
+  await unloadPlugins(registrations);
   sessionManager.shutdown();
   watcher.stop();
+  kvDatabase.close();
   logger.info("Conductor stopped");
 }
 

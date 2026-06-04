@@ -422,3 +422,16 @@ export function resolvePath(p: string): string {
   }
   return p;
 }
+
+export function resolveConfigPath(configPath?: string): string {
+  if (configPath) return resolve(configPath);
+  for (const p of SEARCH_PATHS) {
+    try {
+      readFileSync(p);
+      return resolve(p);
+    } catch {
+      // not found, try next
+    }
+  }
+  return resolve("conductor.config.json");
+}
