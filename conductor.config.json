@@ -1,0 +1,13 @@
+{
+  "plugins": [
+    { "path": "~/.conductor/plugins/github-autofix.ts", "enabled": true }
+  ],
+  "trustedPlugins": {},
+  "concurrency": { "global": 10 },
+  "observability": {
+    "metricsPort": 9090,
+    "logPath": "~/.local/dotlogs/conductor.log"
+  },
+  "idleTimeoutMs": 600000,
+  "prePromptTemplate": "<!-- injected by conductor -->\nYou are running as a headless agent dispatched by conductor.\nDo not ask for permission, clarification, or guidance mid-task.\nIf you are blocked, stop cleanly and describe the blocker in your final message."
+}
