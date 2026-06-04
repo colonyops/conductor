@@ -8,6 +8,7 @@ import {
   watchIpcEvents,
   writeIpcEvent,
 } from "./core/ipc.js";
+import { createMetrics, startMetricsServer } from "./core/observability.js";
 import { SessionManager } from "./core/session.js";
 import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
 import type { PluginRegistration } from "./plugins/loader.js";
@@ -46,6 +47,12 @@ program
         globalLimiter,
       });
 
+      const { registry, metrics } = createMetrics();
+      const metricsServer = startMetricsServer(
+        config.observability.metricsPort,
+        registry,
+      );
+
       const registrations = await loadPlugins({
         config,
         configPath,
@@ -57,6 +64,7 @@ program
       });
 
       const watcher = watchIpcEvents(async (ipcEvent) => {
+        metrics.ipcEventsTotal.inc({ signal: ipcEvent.signal });
         const isApproval = isApprovalSignal(ipcEvent.signal);
         const event: SessionEvent =
           ipcEvent.signal === "activity" ? "PostToolUse" : "Stop";
@@ -74,6 +82,7 @@ program
           registrations,
           sessionManager,
           watcher,
+          metricsServer,
           kvDatabase,
           eventBus,
           logger,
@@ -106,6 +115,7 @@ async function shutdown(
   registrations: PluginRegistration[],
   sessionManager: SessionManager,
   watcher: { stop(): void },
+  metricsServer: { stop(): void },
   kvDatabase: ReturnType<typeof openKVDatabase>,
   eventBus: EventBus,
   logger: ReturnType<typeof createLogger>,
@@ -114,6 +124,7 @@ async function shutdown(
   await unloadPlugins(registrations);
   sessionManager.shutdown();
   watcher.stop();
+  metricsServer.stop();
   kvDatabase.close();
   logger.info("Conductor stopped");
 }
