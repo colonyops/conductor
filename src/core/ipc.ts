@@ -4,10 +4,15 @@ import { join } from "node:path";
 import { resolvePath } from "../config.js";
 import type { IpcEvent, IpcSignal } from "../types.js";
 
-export const CONDUCTOR_DATA_DIR = process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ?? resolvePath("~/.local/conductor");
+export function conductorDataDir(): string {
+  return process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ?? resolvePath("~/.local/conductor");
+}
+
+// Keep the named export for callers that reference the value directly.
+export const CONDUCTOR_DATA_DIR = conductorDataDir();
 
 export function sessionEventsDir(sessionId: string): string {
-  return join(CONDUCTOR_DATA_DIR, "sessions", sessionId, "events");
+  return join(conductorDataDir(), "sessions", sessionId, "events");
 }
 
 export async function writeIpcEvent(sessionId: string, signal: IpcSignal): Promise<void> {
@@ -59,7 +64,7 @@ export async function drainEventFiles(sessionId: string): Promise<IpcEvent[]> {
 export type IpcEventHandler = (event: IpcEvent) => Promise<void>;
 
 export function watchIpcEvents(handler: IpcEventHandler): { stop(): void } {
-  const sessionsDir = join(CONDUCTOR_DATA_DIR, "sessions");
+  const sessionsDir = join(conductorDataDir(), "sessions");
   mkdirSync(sessionsDir, { recursive: true });
 
   // Debounce: one drain pass runs at a time across all sessions.
