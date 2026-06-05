@@ -1,0 +1,34 @@
+[Unit]
+Description=Conductor AI session daemon
+Documentation=https://github.com/colonyops/conductor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=conductor
+Group=conductor
+WorkingDirectory=/opt/conductor
+ExecStart=/usr/local/bin/bun src/index.ts start --config /etc/conductor/conductor.config.json
+Restart=on-failure
+RestartSec=5s
+
+# Allow conductor to read the hive CLI from the system PATH
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Override data directory if the default ~/.local/conductor is not suitable
+# Environment=CONDUCTOR_DATA_DIR=/var/lib/conductor
+
+# Stdout/stderr go to the systemd journal; conductor also writes structured
+# logs to the path configured in observability.logPath
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=conductor
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/conductor /var/log/conductor /etc/conductor
+
+[Install]
+WantedBy=multi-user.target

@@ -44,6 +44,8 @@ cd conductor
 bun install
 ```
 
+For production server deployments, see [docs/deployment.md](docs/deployment.md) — covers the systemd service, config setup, health checks, and upgrade steps.
+
 ## Quickstart
 
 ```bash
