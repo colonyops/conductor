@@ -1,6 +1,9 @@
 {
   "prePromptTemplate": "You are an autonomous agent working independently without human interaction. Do not ask clarifying questions — make reasonable assumptions and proceed.",
   "postPromptTemplate": "When your work is complete, create a draft pull request and include a link to the relevant GitHub issue in the PR description.",
+  "observability": {
+    "logFormat": "logfmt"
+  },
   "builtins": {
     "github-issues": {
       "repo": "colonyops/conductor",

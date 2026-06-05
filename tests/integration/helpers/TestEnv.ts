@@ -170,7 +170,7 @@ export class TestEnv {
         logPath: this.logPath,
         logMaxBytes: 10_485_760,
         logMaxBackups: 5,
-        logFormat: "json",
+        logFormat: "json" as const,
         logCaller: false,
       },
       idleTimeoutMs: this.opts.idleTimeoutMs ?? 60_000,

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, symlinkSync } from "node:fs";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
 import type { Logger } from "../sdk/logger.js";
@@ -48,8 +48,29 @@ export async function injectHooks(
     ],
   };
 
+  const permissions = (existing.permissions as Record<string, unknown> | undefined) ?? {};
+  const allow = (permissions.allow as string[] | undefined) ?? [];
+  existing.permissions = {
+    ...permissions,
+    allow: [
+      ...allow,
+      `Bash(conductor signal stop --session ${sessionId})`,
+      `Bash(conductor signal activity --session ${sessionId})`,
+    ],
+  };
+
   mkdirSync(`${workDir}/.claude`, { recursive: true });
   await Bun.write(settingsPath, `${JSON.stringify(existing, null, 2)}\n`);
+}
+
+export async function injectPrePrompt(workDir: string, template: string): Promise<void> {
+  const agentsPath = `${workDir}/agents.md`;
+  await Bun.write(agentsPath, `${template}\n`);
+  try {
+    symlinkSync("agents.md", `${workDir}/CLAUDE.md`);
+  } catch {
+    // CLAUDE.md already exists
+  }
 }
 
 export function buildPromptWithTemplates(
@@ -133,7 +154,7 @@ export class SessionManager {
         postTemplate,
       );
 
-      const { id, workDir } = await hiveNew({
+      const { id, workDir, existed } = await hiveNew({
         name: opts.name,
         remote: opts.remote,
         ...(prompt !== undefined ? { prompt } : {}),
@@ -143,7 +164,14 @@ export class SessionManager {
       // Ensure events dir exists
       mkdirSync(sessionEventsDir(id), { recursive: true });
 
-      await injectHooks(workDir, id);
+      if (!existed) {
+        await injectHooks(workDir, id);
+
+        if (preTemplate) {
+          await injectPrePrompt(workDir, preTemplate);
+        }
+      }
+
 
       const session = buildSession(
         id,

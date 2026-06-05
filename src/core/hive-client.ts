@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -75,7 +76,7 @@ let hiveNewQueue: Promise<void> = Promise.resolve();
 
 export async function hiveNew(
   args: HiveNewSessionArgs,
-): Promise<{ id: string; workDir: string }> {
+): Promise<{ id: string; workDir: string; existed: boolean }> {
   const prev = hiveNewQueue;
   let release!: () => void;
   hiveNewQueue = new Promise<void>((resolve) => {
@@ -115,16 +116,57 @@ export async function hiveNew(
     }
 
     const result = parsed.results[0];
-    if (!result || result.status !== "created") {
+
+    if (result?.status !== "created") {
+      if (result?.error?.includes("already exists")) {
+        const existing = (await hiveSessionList()).find(
+          (s) => s.name === args.name,
+        );
+        if (existing) {
+          return { id: existing.id, workDir: "", existed: true };
+        }
+      }
       throw new Error(
         `hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`,
       );
     }
 
-    return { id: result.session_id, workDir: result.path };
+    await acceptTrustPrompt(result.name, result.path);
+
+    return { id: result.session_id, workDir: result.path, existed: false };
   } finally {
     release();
   }
+}
+
+// Claude Code encodes the project path as the directory name under ~/.claude/projects/
+// by replacing '/' with '-' and removing '.'.
+function encodeProjectPath(absPath: string): string {
+  return absPath.replace(/\//g, "-").replace(/\./g, "");
+}
+
+async function acceptTrustPrompt(
+  sessionName: string,
+  workDir: string,
+): Promise<void> {
+  const projectDir = join(
+    homedir(),
+    ".claude",
+    "projects",
+    encodeProjectPath(workDir),
+  );
+  if (existsSync(projectDir)) {
+    // Directory already trusted from a prior session — no prompt will appear.
+    return;
+  }
+
+  // New directory: wait for Claude Code to render the trust prompt, then accept.
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  const proc = Bun.spawn(
+    ["tmux", "send-keys", "-t", `${sessionName}:claude`, "", "Enter"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  await proc.exited;
 }
 
 export async function hiveRecycle(_sessionId: string): Promise<void> {

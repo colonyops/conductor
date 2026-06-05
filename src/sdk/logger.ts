@@ -34,12 +34,15 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
   error: "\x1b[31m",
 };
 const LEVEL_LABEL: Record<LogLevel, string> = {
-  debug: "DEBUG",
-  info: "INFO ",
-  warn: "WARN ",
-  error: "ERROR",
+  debug: "DBG",
+  info: "INF",
+  warn: "WRN",
+  error: "ERR",
 };
 const RESET = "\x1b[0m";
+const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
+const COLOR_KEY = "\x1b[36m";      // cyan
 
 const LOGFMT_ORDERED = ["ts", "level", "component", "msg", "caller"];
 
@@ -61,6 +64,21 @@ function formatLogfmt(entry: Record<string, unknown>): string {
   for (const [key, val] of Object.entries(entry)) {
     if (LOGFMT_ORDERED.includes(key) || val === undefined) continue;
     parts.push(`${key}=${logfmtValue(val)}`);
+  }
+  return parts.join(" ");
+}
+
+function coloredValue(v: unknown): string {
+  if (v === null || v === undefined) return `${DIM}null${RESET}`;
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  return s === "" || /[\s="\\]/.test(s) ? JSON.stringify(s) : s;
+}
+
+function formatLogfmtColored(data: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (val === undefined) continue;
+    parts.push(`${COLOR_KEY}${key}${RESET}${DIM}=${RESET}${coloredValue(val)}`);
   }
   return parts.join(" ");
 }
@@ -172,11 +190,17 @@ function buildLogger(
       const color = LEVEL_COLOR[level];
       const label = LEVEL_LABEL[level];
       const component = String(baseFields.component ?? "");
-      const dataStr =
-        data && Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : "";
-      const callerStr = withCaller && entry.caller ? ` (${entry.caller})` : "";
+      let dataStr = "";
+      if (data && Object.keys(data).length > 0) {
+        dataStr =
+          sink.format === "logfmt"
+            ? ` ${formatLogfmtColored(data)}`
+            : ` ${JSON.stringify(data)}`;
+      }
+      const callerStr =
+        withCaller && entry.caller ? ` ${DIM}(${entry.caller})${RESET}` : "";
       process.stderr.write(
-        `${ts} ${color}[${label}]${RESET} ${component}: ${msg}${dataStr}${callerStr}\n`,
+        `${DIM}${ts}${RESET} ${color}[${label}]${RESET} ${BOLD}${component}${RESET}: ${msg}${dataStr}${callerStr}\n`,
       );
     } else {
       process.stderr.write(`${sink.serialize(entry)}\n`);
