@@ -76,6 +76,23 @@ describe("BunSqliteKVStore", () => {
     expect(fooKeys.sort()).toEqual(["foo:1", "foo:2"]);
   });
 
+  it("keys with prefix escapes LIKE wildcards", async () => {
+    const store = db.forPlugin("wildcard-test");
+    await store.set("a%b:1", 1);
+    await store.set("axb:2", 2);
+    await store.set("a_b:1", 3);
+    await store.set("aXb:2", 4);
+    await store.set("a\\b:1", 5);
+    await store.set("axbZ:6", 6);
+
+    // '%' must match literally, not as a wildcard
+    expect((await store.keys("a%b:")).sort()).toEqual(["a%b:1"]);
+    // '_' must match literally, not as a single-char wildcard
+    expect((await store.keys("a_b:")).sort()).toEqual(["a_b:1"]);
+    // '\' must match literally, not be consumed as an escape char
+    expect((await store.keys("a\\b:")).sort()).toEqual(["a\\b:1"]);
+  });
+
   it("clear removes all keys in scope", async () => {
     const store = db.forPlugin("clear-test");
     await store.set("x", 1);
