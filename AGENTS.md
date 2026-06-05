@@ -65,3 +65,12 @@ Plugins export `definePlugin({ id, name, init })` as default. `init(ctx)` receiv
 ### Integration tests
 
 Tests in `tests/integration/scenarios/` use `TestEnv` (manages isolated conductor data dirs and temp hive workspaces) and `ConductorDaemon` (starts/stops the daemon subprocess). Each scenario is numbered and independent. They require `hive` CLI on `PATH`.
+
+## Package Manager Policy
+
+This repository uses `bunfig.toml` to enforce:
+
+- **minimumReleaseAge = 259200** (3 days) — packages published less than 3 days ago are blocked.
+- **ignoreScripts = true** — lifecycle scripts (postinstall, etc.) are not executed.
+
+Do not bypass these settings. If a package install fails due to `minimumReleaseAge`, report the package name and version and stop.
