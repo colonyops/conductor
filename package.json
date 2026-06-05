@@ -11,7 +11,8 @@
     "test": "bun test tests/unit/",
     "test:watch": "bun test --watch tests/unit/",
     "test:integration": "bun test tests/integration/scenarios/ --timeout=120000",
-    "test:e2e": "bun test tests/e2e/"
+    "test:e2e": "bun test tests/e2e/",
+    "build": "bun build src/index.ts --outfile dist/conductor.js"
   },
   "dependencies": {
     "commander": "^12.1.0",

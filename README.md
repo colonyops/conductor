@@ -38,8 +38,26 @@ Sessions are recycled (cleaned up via `hive recycle`) only when they reach `COMP
 
 ## Installation
 
+### From a release (recommended)
+
+Download the tarball from the [latest release](https://github.com/colonyops/conductor/releases/latest), extract, and run:
+
 ```bash
-git clone <repo>
+curl -sL https://github.com/colonyops/conductor/releases/latest/download/conductor.tar.gz | tar -xz
+bun conductor.js start
+```
+
+For a persistent install, move `conductor.js` somewhere on your `PATH` and wrap it in a small script:
+
+```bash
+#!/usr/bin/env sh
+exec bun /usr/local/lib/conductor/conductor.js "$@"
+```
+
+### From source
+
+```bash
+git clone https://github.com/colonyops/conductor
 cd conductor
 bun install
 ```
@@ -47,7 +65,10 @@ bun install
 ## Quickstart
 
 ```bash
-# Start the daemon (foreground, auto-discovers conductor.config.json)
+# From a release install
+bun conductor.js start
+
+# From source
 bun conductor start
 
 # Specify a config file explicitly

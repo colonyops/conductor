@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type (patch/minor/major) or explicit semver (e.g. 1.2.3)'
+        required: true
+        default: patch
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version bump type (patch/minor/major) or explicit semver (e.g. 1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag, Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint & Typecheck
+        run: |
+          bun run lint
+          bun run typecheck
+
+      - name: Compute version
+        id: version
+        run: |
+          INPUT="${{ inputs.version }}"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT="${LAST_TAG#v}"
+
+          # Split into parts
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+          if [[ "$INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            NEW_VERSION="$INPUT"
+          elif [[ "$INPUT" == "major" ]]; then
+            NEW_VERSION="$((MAJOR + 1)).0.0"
+          elif [[ "$INPUT" == "minor" ]]; then
+            NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+          elif [[ "$INPUT" == "patch" ]]; then
+            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          else
+            echo "Invalid version input: $INPUT"
+            exit 1
+          fi
+
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG="${{ steps.version.outputs.last_tag }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
+            RANGE="${LAST_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          CHANGELOG=$(git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges)
+
+          if [[ -z "$CHANGELOG" ]]; then
+            CHANGELOG="- No significant changes"
+          fi
+
+          {
+            echo "body<<EOF"
+            echo "## What's Changed"
+            echo ""
+            echo "$CHANGELOG"
+            echo ""
+            echo "**Full changelog:** \`${LAST_TAG}..${TAG}\`"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Build bundle
+        run: |
+          mkdir -p dist
+          bun build src/index.ts --outfile dist/conductor.js
+          tar -czf dist/conductor.tar.gz -C dist conductor.js
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "Release $TAG" \
+            --notes "${{ steps.changelog.outputs.body }}" \
+            dist/conductor.tar.gz
