@@ -220,6 +220,32 @@ Available metrics:
 
 Logs are newline-delimited JSON written to `observability.logPath`, with automatic rotation at `logMaxBytes`.
 
+## Development
+
+### Git hooks
+
+This project uses [lefthook](https://github.com/evilmartians/lefthook) to run checks before commits and pushes. Hooks install automatically when you run `bun install` (via the `prepare` script).
+
+To install manually:
+
+```bash
+bunx lefthook install
+```
+
+**Pre-commit hooks** (run in parallel):
+- `bun run lint` — Biome linter
+- `bun run format` — Biome formatter; fails if any file needed reformatting
+- `bun run typecheck` — TypeScript type checking
+
+**Pre-push hooks:**
+- `bun run test` — unit test suite
+
+To skip hooks in an emergency:
+
+```bash
+LEFTHOOK=0 git commit -m "..."
+```
+
 ## Testing
 
 ```bash
