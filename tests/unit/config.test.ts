@@ -182,6 +182,33 @@ describe("validateConfig", () => {
     expect(errors.some((e) => e.field.includes("assignee"))).toBe(true);
   });
 
+  it("accepts maxOpenSessions field in github-issues builtin", () => {
+    const { config, errors } = validateConfig({
+      builtins: {
+        "github-issues": {
+          repo: "owner/repo",
+          labels: ["conductor"],
+          maxOpenSessions: 3,
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.builtins["github-issues"]?.maxOpenSessions).toBe(3);
+  });
+
+  it("rejects non-positive maxOpenSessions in github-issues builtin", () => {
+    const { errors } = validateConfig({
+      builtins: {
+        "github-issues": {
+          repo: "owner/repo",
+          labels: ["conductor"],
+          maxOpenSessions: 0,
+        },
+      },
+    });
+    expect(errors.some((e) => e.field.includes("maxOpenSessions"))).toBe(true);
+  });
+
   it("accepts valid prePromptTemplate", () => {
     const { config, errors } = validateConfig({
       prePromptTemplate: "You are an agent.",

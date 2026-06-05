@@ -92,8 +92,10 @@ interface SessionEntry {
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
+const PLUGIN_ID = "conductor.builtin.github-issues";
+
 export default definePlugin({
-  id: "conductor.builtin.github-issues",
+  id: PLUGIN_ID,
   name: "GitHub Issues",
   requiredSecrets: [],
 
@@ -120,6 +122,9 @@ export default definePlugin({
     const assignee = process.env.CONDUCTOR_GITHUB_ASSIGNEE || undefined;
     const inProgressLabel = process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL;
     const doneLabel = process.env.CONDUCTOR_GITHUB_DONE_LABEL;
+    const maxOpenSessions = process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS
+      ? Number(process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS)
+      : undefined;
 
     if (!repo || !labelsStr) {
       logger.warn("GitHub Issues plugin: missing CONDUCTOR_GITHUB_REPO or CONDUCTOR_GITHUB_LABELS, skipping");
@@ -170,6 +175,18 @@ export default definePlugin({
       for (const issue of issues) {
         const seenKey = `seen:${issue.id}`;
         if (await kv.has(seenKey)) continue;
+
+        if (maxOpenSessions !== undefined) {
+          const openCount = hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length;
+          if (openCount >= maxOpenSessions) {
+            logger.info("GitHub Issues: max open sessions reached, deferring issue", {
+              issueNumber: issue.number,
+              openCount,
+              maxOpenSessions,
+            });
+            break;
+          }
+        }
 
         logger.info("GitHub Issues: new issue found, creating session", {
           issueNumber: issue.number,

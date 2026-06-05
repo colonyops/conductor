@@ -23,6 +23,7 @@ export interface GitHubIssuesBuiltinConfig {
   assignee?: string;
   inProgressLabel?: string;
   doneLabel?: string;
+  maxOpenSessions?: number;
 }
 
 export interface ConductorConfig {
@@ -164,6 +165,12 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
   }
   if (raw.assignee !== undefined && typeof raw.assignee !== "string") {
     errors.push({ field: `${p}.assignee`, message: "must be a string" });
+  }
+  if (raw.maxOpenSessions !== undefined && (typeof raw.maxOpenSessions !== "number" || raw.maxOpenSessions <= 0)) {
+    errors.push({
+      field: `${p}.maxOpenSessions`,
+      message: "must be a positive number",
+    });
   }
   return errors;
 }

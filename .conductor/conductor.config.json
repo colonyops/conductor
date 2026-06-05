@@ -11,7 +11,8 @@
       "inProgressLabel": "conductor/in-progress",
       "doneLabel": "conductor/done",
       "pollIntervalMs": 60000,
-      "tokenSource": "gh-cli"
+      "tokenSource": "gh-cli",
+      "maxOpenSessions": 3
     }
   }
 }

@@ -297,6 +297,9 @@ export async function loadPlugins(opts: {
     if (giConfig.doneLabel) {
       process.env.CONDUCTOR_GITHUB_DONE_LABEL = giConfig.doneLabel;
     }
+    if (giConfig.maxOpenSessions !== undefined) {
+      process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS = String(giConfig.maxOpenSessions);
+    }
 
     let builtinModule: { default: Plugin };
     try {
