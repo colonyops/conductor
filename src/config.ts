@@ -2,6 +2,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { LogFormat } from "./sdk/logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ export interface ConductorConfig {
     logPath: string;
     logMaxBytes: number;
     logMaxBackups: number;
+    logFormat: LogFormat;
+    logCaller: boolean;
   };
   idleTimeoutMs: number;
   prePromptTemplate?: string;
@@ -50,6 +53,8 @@ export const CONFIG_DEFAULTS: ConductorConfig = {
     logPath: "~/.local/dotlogs/conductor.log",
     logMaxBytes: 10_485_760,
     logMaxBackups: 5,
+    logFormat: "json" as LogFormat,
+    logCaller: false,
   },
   idleTimeoutMs: 600_000,
   builtins: {},
@@ -280,6 +285,22 @@ export function validateConfig(raw: unknown): {
           message: "must be a non-negative number",
         });
       }
+      if (
+        obs.logFormat !== undefined &&
+        obs.logFormat !== "json" &&
+        obs.logFormat !== "logfmt"
+      ) {
+        errors.push({
+          field: "observability.logFormat",
+          message: 'must be "json" or "logfmt"',
+        });
+      }
+      if (obs.logCaller !== undefined && typeof obs.logCaller !== "boolean") {
+        errors.push({
+          field: "observability.logCaller",
+          message: "must be a boolean",
+        });
+      }
     }
   }
 
@@ -343,6 +364,12 @@ export function validateConfig(raw: unknown): {
       logMaxBackups:
         rawObj.observability?.logMaxBackups ??
         CONFIG_DEFAULTS.observability.logMaxBackups,
+      logFormat:
+        (rawObj.observability?.logFormat as LogFormat | undefined) ??
+        CONFIG_DEFAULTS.observability.logFormat,
+      logCaller:
+        rawObj.observability?.logCaller ??
+        CONFIG_DEFAULTS.observability.logCaller,
     },
     idleTimeoutMs: rawObj.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs,
     builtins: buildBuiltins(rawObj.builtins),

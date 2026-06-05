@@ -8,13 +8,15 @@ import {
 import { dirname } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogFormat = "json" | "logfmt";
 
 export interface LogEntry {
   ts: string;
   level: LogLevel;
-  plugin: string;
+  component: string;
   msg: string;
-  data?: Record<string, unknown>;
+  caller?: string;
+  [key: string]: unknown;
 }
 
 export interface Logger {
@@ -22,6 +24,7 @@ export interface Logger {
   info(msg: string, data?: Record<string, unknown>): void;
   warn(msg: string, data?: Record<string, unknown>): void;
   error(msg: string, data?: Record<string, unknown>): void;
+  with(fields: Record<string, unknown>): Logger;
 }
 
 const LEVEL_COLOR: Record<LogLevel, string> = {
@@ -38,16 +41,59 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
 };
 const RESET = "\x1b[0m";
 
-export function createLogger(opts: {
-  pluginName: string;
+const LOGFMT_ORDERED = ["ts", "level", "component", "msg", "caller"];
+
+function logfmtValue(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  if (s === "" || /[\s="\\]/.test(s)) return JSON.stringify(s);
+  return s;
+}
+
+function formatLogfmt(entry: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const key of LOGFMT_ORDERED) {
+    if (key in entry && entry[key] !== undefined) {
+      parts.push(`${key}=${logfmtValue(entry[key])}`);
+    }
+  }
+  for (const [key, val] of Object.entries(entry)) {
+    if (LOGFMT_ORDERED.includes(key) || val === undefined) continue;
+    parts.push(`${key}=${logfmtValue(val)}`);
+  }
+  return parts.join(" ");
+}
+
+function getCaller(): string | undefined {
+  const stack = new Error().stack;
+  if (!stack) return undefined;
+  for (const line of stack.split("\n").slice(1)) {
+    if (line.includes("sdk/logger")) continue;
+    const m =
+      line.match(/\((.+?):(\d+):\d+\)$/) || line.match(/at (.+?):(\d+):\d+$/);
+    if (!m) continue;
+    const file = (m[1] ?? "").replace(/^file:\/\//, "");
+    return `${file}:${m[2]}`;
+  }
+  return undefined;
+}
+
+interface LogSink {
+  format: LogFormat;
+  serialize(entry: Record<string, unknown>): string;
+  writeToFile(entry: Record<string, unknown>): void;
+}
+
+function createLogSink(opts: {
   logPath: string;
   logMaxBytes: number;
   logMaxBackups: number;
-}): Logger {
-  const { pluginName, logPath, logMaxBytes, logMaxBackups } = opts;
+  format: LogFormat;
+}): LogSink {
+  const { logPath, logMaxBytes, logMaxBackups, format } = opts;
   mkdirSync(dirname(logPath), { recursive: true });
 
-  // Track current log file size in memory to avoid a stat() on every write.
   let size = 0;
   try {
     size = statSync(logPath).size;
@@ -56,13 +102,11 @@ export function createLogger(opts: {
   }
 
   function rotate(): void {
-    // Delete oldest backup to make room.
     try {
       unlinkSync(`${logPath}.${logMaxBackups}`);
     } catch {
       // Doesn't exist — fine.
     }
-    // Shift .{N-1} → .{N} from oldest to newest (descending index).
     for (let i = logMaxBackups - 1; i >= 1; i--) {
       try {
         renameSync(`${logPath}.${i}`, `${logPath}.${i + 1}`);
@@ -70,7 +114,6 @@ export function createLogger(opts: {
         // Source may not exist — skip.
       }
     }
-    // Rotate current log to .1.
     try {
       renameSync(logPath, `${logPath}.1`);
     } catch {
@@ -79,38 +122,64 @@ export function createLogger(opts: {
     size = 0;
   }
 
+  function serialize(entry: Record<string, unknown>): string {
+    return format === "json" ? JSON.stringify(entry) : formatLogfmt(entry);
+  }
+
+  return {
+    format,
+    serialize,
+    writeToFile(entry: Record<string, unknown>): void {
+      const line = `${serialize(entry)}\n`;
+      if (size + line.length > logMaxBytes) rotate();
+      try {
+        appendFileSync(logPath, line, "utf-8");
+        size += line.length;
+      } catch {
+        // Best-effort — don't throw from a logger.
+      }
+    },
+  };
+}
+
+function buildLogger(
+  sink: LogSink,
+  baseFields: Record<string, unknown>,
+  withCaller: boolean,
+): Logger {
   function write(
     level: LogLevel,
     msg: string,
     data?: Record<string, unknown>,
   ): void {
     const ts = new Date().toISOString();
-    const entry: LogEntry = { ts, level, plugin: pluginName, msg };
-    if (data && Object.keys(data).length > 0) entry.data = data;
-    const line = `${JSON.stringify(entry)}\n`;
-
-    if (size + line.length > logMaxBytes) rotate();
-
-    try {
-      appendFileSync(logPath, line, "utf-8");
-      size += line.length;
-    } catch {
-      // Best-effort — don't throw from a logger.
+    const entry: Record<string, unknown> = {
+      ts,
+      level,
+      ...baseFields,
+      msg,
+      ...(data ?? {}),
+    };
+    if (withCaller) {
+      entry.caller = getCaller();
     }
 
-    // Emit to stderr for info and above.
+    sink.writeToFile(entry);
+
     if (level === "debug") return;
 
     if (process.stderr.isTTY) {
       const color = LEVEL_COLOR[level];
       const label = LEVEL_LABEL[level];
+      const component = String(baseFields.component ?? "");
       const dataStr =
         data && Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : "";
+      const callerStr = withCaller && entry.caller ? ` (${entry.caller})` : "";
       process.stderr.write(
-        `${ts} ${color}[${label}]${RESET} ${pluginName}: ${msg}${dataStr}\n`,
+        `${ts} ${color}[${label}]${RESET} ${component}: ${msg}${dataStr}${callerStr}\n`,
       );
     } else {
-      process.stderr.write(line);
+      process.stderr.write(`${sink.serialize(entry)}\n`);
     }
   }
 
@@ -119,5 +188,24 @@ export function createLogger(opts: {
     info: (msg, data) => write("info", msg, data),
     warn: (msg, data) => write("warn", msg, data),
     error: (msg, data) => write("error", msg, data),
+    with: (fields) =>
+      buildLogger(sink, { ...baseFields, ...fields }, withCaller),
   };
+}
+
+export function createLogger(opts: {
+  component: string;
+  logPath: string;
+  logMaxBytes: number;
+  logMaxBackups: number;
+  format?: LogFormat;
+  caller?: boolean;
+}): Logger {
+  const sink = createLogSink({
+    logPath: opts.logPath,
+    logMaxBytes: opts.logMaxBytes,
+    logMaxBackups: opts.logMaxBackups,
+    format: opts.format ?? "json",
+  });
+  return buildLogger(sink, { component: opts.component }, opts.caller ?? false);
 }
