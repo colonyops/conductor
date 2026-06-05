@@ -16,11 +16,25 @@ interface GitHubIssue {
   repository_url: string;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+export function issueSlug(number: number, title: string, maxLen = 40): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  const prefix = `gh-${number}-`;
+  return (prefix + slug).slice(0, maxLen).replace(/-$/, "");
+}
+
 // ── GitHub REST helpers ───────────────────────────────────────────────────────
 
-async function fetchIssues(token: string, repo: string, labels: string[]): Promise<GitHubIssue[]> {
+async function fetchIssues(token: string, repo: string, labels: string[], assignee?: string): Promise<GitHubIssue[]> {
   const labelParam = encodeURIComponent(labels.join(","));
-  const url = `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
+  let url = `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
+  if (assignee) {
+    url += `&assignee=${encodeURIComponent(assignee)}`;
+  }
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -119,6 +133,7 @@ export default definePlugin({
     const pollIntervalMs = Number(process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS ?? "300000");
     const tokenSecretKey = process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
     const tokenSource = process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE ?? "secret";
+    const assignee = process.env.CONDUCTOR_GITHUB_ASSIGNEE || undefined;
     const inProgressLabel = process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL;
     const doneLabel = process.env.CONDUCTOR_GITHUB_DONE_LABEL;
 
@@ -153,13 +168,14 @@ export default definePlugin({
     logger.info("GitHub Issues plugin initialized", {
       repo,
       labels,
+      assignee,
       pollIntervalMs,
     });
 
     async function poll(): Promise<void> {
       let issues: GitHubIssue[];
       try {
-        issues = await fetchIssues(token, repo as string, labels);
+        issues = await fetchIssues(token, repo as string, labels, assignee);
       } catch (err) {
         logger.error("GitHub Issues: poll failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -179,7 +195,7 @@ export default definePlugin({
         let sessionId: string;
         try {
           const session = await hive.newSession({
-            name: `gh-issue-${issue.number}`,
+            name: issueSlug(issue.number, issue.title),
             remote: `https://github.com/${repo}`,
             context: `Issue #${issue.number}: ${issue.title}\n${issue.html_url}`,
           });

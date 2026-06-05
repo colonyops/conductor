@@ -288,6 +288,9 @@ export async function loadPlugins(opts: {
     process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(giConfig.pollIntervalMs);
     process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY = giConfig.tokenSecretKey;
     process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = giConfig.tokenSource;
+    if (giConfig.assignee) {
+      process.env.CONDUCTOR_GITHUB_ASSIGNEE = giConfig.assignee;
+    }
     if (giConfig.inProgressLabel) {
       process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL = giConfig.inProgressLabel;
     }

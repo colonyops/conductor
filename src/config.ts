@@ -20,6 +20,7 @@ export interface GitHubIssuesBuiltinConfig {
   repo: string;
   labels: string[];
   pollIntervalMs: number;
+  assignee?: string;
   inProgressLabel?: string;
   doneLabel?: string;
 }
@@ -160,6 +161,9 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
       field: `${p}.tokenSource`,
       message: 'must be "secret" or "gh-cli"',
     });
+  }
+  if (raw.assignee !== undefined && typeof raw.assignee !== "string") {
+    errors.push({ field: `${p}.assignee`, message: "must be a string" });
   }
   return errors;
 }
