@@ -127,7 +127,7 @@ export function startMetricsServer(port: number, registry: Registry): { stop(): 
 
   return {
     stop() {
-      server.stop();
+      void server.stop();
     },
   };
 }

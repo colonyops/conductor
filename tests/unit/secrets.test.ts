@@ -35,7 +35,7 @@ describe("createSecretsClient", () => {
   describe("keychain mock", () => {
     it("resolves from macOS keychain when security command succeeds", async () => {
       // Spy on Bun.spawn to simulate a successful keychain lookup
-      const original = Bun.spawn;
+      const _original = Bun.spawn;
       const mockProc = {
         exited: Promise.resolve(0),
         stdout: new Response("keychain-secret\n").body,

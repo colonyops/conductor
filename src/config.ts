@@ -1,5 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { LogFormat } from "./sdk/logger.js";

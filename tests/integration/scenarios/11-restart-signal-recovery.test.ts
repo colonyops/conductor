@@ -2,7 +2,6 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
-import { byMsgData, pollLog } from "../helpers/logUtils.js";
 
 describe("11 — restart signal recovery", () => {
   let env: TestEnv;

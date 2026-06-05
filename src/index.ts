@@ -5,8 +5,7 @@ import { EventBus } from "./core/events.js";
 import { CONDUCTOR_DATA_DIR, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
 import { createMetrics, startMetricsServer } from "./core/observability.js";
 import { SessionManager } from "./core/session.js";
-import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
-import type { PluginRegistration } from "./plugins/loader.js";
+import { type PluginRegistration, loadPlugins, unloadPlugins } from "./plugins/loader.js";
 import { createConcurrencyLimiter } from "./sdk/concurrency.js";
 import { openKVDatabase } from "./sdk/kv.js";
 import { createLogger } from "./sdk/logger.js";
@@ -647,4 +646,4 @@ kvCmd
     }
   });
 
-program.parseAsync(process.argv);
+await program.parseAsync(process.argv);

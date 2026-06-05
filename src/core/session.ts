@@ -5,7 +5,7 @@ import type { Logger } from "../sdk/logger.js";
 import type { Session, SessionEvent } from "../types.js";
 import type { EventBus } from "./events.js";
 import { hiveNew, hiveRecycle } from "./hive-client.js";
-import { CONDUCTOR_DATA_DIR, sessionEventsDir } from "./ipc.js";
+import { sessionEventsDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
 
 // ── Hook injection helpers ────────────────────────────────────────────────────

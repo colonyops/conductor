@@ -64,8 +64,8 @@ async function keychainSet(key: string, value: string): Promise<void> {
         ["secret-tool", "store", "--label", `conductor/${key}`, "service", "conductor", "username", key],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       );
-      proc.stdin.write(value);
-      proc.stdin.end();
+      void proc.stdin.write(value);
+      void proc.stdin.end();
       await proc.exited;
     }
   } catch {

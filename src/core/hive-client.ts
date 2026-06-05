@@ -96,8 +96,8 @@ export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; w
       stdout: "pipe",
       stderr: "pipe",
     });
-    proc.stdin.write(input);
-    proc.stdin.end();
+    void proc.stdin.write(input);
+    void proc.stdin.end();
     await proc.exited;
 
     const raw = await new Response(proc.stdout).text();
