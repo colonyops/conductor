@@ -490,6 +490,8 @@ Set `GITHUB_TOKEN` in your CI environment and the keychain lookup is skipped.
 | [`src/sdk/`](../src/sdk/) | Plugin SDK — `hive`, `secrets`, `kv`, `scheduler`, `http`, `logger` |
 | [`src/plugins/github-issues.ts`](../src/plugins/github-issues.ts) | Built-in GitHub Issues plugin |
 
+For the metrics and logging reference, see the [Observability Guide](./observability.md).
+
 For the complete plugin SDK reference, run:
 
 ```bash
