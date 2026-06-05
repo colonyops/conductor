@@ -18,7 +18,6 @@ export interface GitHubIssuesBuiltinConfig {
   repo: string;
   labels: string[];
   pollIntervalMs: number;
-  cloneStrategy: "full" | "worktree";
   inProgressLabel?: string;
   doneLabel?: string;
 }
