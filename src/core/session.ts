@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
@@ -85,16 +85,6 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
     }
   } catch {
     // Not a git repo or .git/info/exclude doesn't exist — skip
-  }
-}
-
-export async function injectPrePrompt(workDir: string, template: string): Promise<void> {
-  const agentsPath = `${workDir}/agents.md`;
-  await Bun.write(agentsPath, `${template}\n`);
-  try {
-    symlinkSync("agents.md", `${workDir}/CLAUDE.md`);
-  } catch {
-    // CLAUDE.md already exists
   }
 }
 
@@ -186,10 +176,6 @@ export class SessionManager {
 
       if (!existed) {
         await injectHooks(workDir, id);
-
-        if (preTemplate) {
-          await injectPrePrompt(workDir, preTemplate);
-        }
       }
 
       const session = buildSession(id, opts.name, opts.pluginId, workDir, false);
