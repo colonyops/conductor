@@ -9,6 +9,7 @@ export interface NewSessionOptions {
   agent?: string;
   idleTimeoutMs?: number;
   prePromptOverride?: string;
+  postPromptOverride?: string;
 }
 
 type SessionEventHandler<E extends CoreEventName> = (

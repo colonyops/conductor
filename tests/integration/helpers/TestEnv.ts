@@ -64,6 +64,7 @@ export interface TestEnvOptions {
   idleTimeoutMs?: number;
   globalConcurrency?: number;
   prePromptTemplate?: string;
+  postPromptTemplate?: string;
   plugins?: PluginOpt[];
 }
 
@@ -176,6 +177,10 @@ export class TestEnv {
 
     if (this.opts.prePromptTemplate !== undefined) {
       config.prePromptTemplate = this.opts.prePromptTemplate;
+    }
+
+    if (this.opts.postPromptTemplate !== undefined) {
+      config.postPromptTemplate = this.opts.postPromptTemplate;
     }
 
     writeFileSync(this.configPath, `${JSON.stringify(config, null, 2)}\n`);

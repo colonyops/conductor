@@ -37,6 +37,7 @@ export interface ConductorConfig {
   };
   idleTimeoutMs: number;
   prePromptTemplate?: string;
+  postPromptTemplate?: string;
   builtins: {
     "github-issues"?: GitHubIssuesBuiltinConfig;
   };
@@ -321,6 +322,13 @@ export function validateConfig(raw: unknown): {
     errors.push({ field: "prePromptTemplate", message: "must be a string" });
   }
 
+  if (
+    raw.postPromptTemplate !== undefined &&
+    typeof raw.postPromptTemplate !== "string"
+  ) {
+    errors.push({ field: "postPromptTemplate", message: "must be a string" });
+  }
+
   if (raw.builtins !== undefined) {
     if (!isObject(raw.builtins)) {
       errors.push({ field: "builtins", message: "must be an object" });
@@ -375,6 +383,9 @@ export function validateConfig(raw: unknown): {
     builtins: buildBuiltins(rawObj.builtins),
     ...(rawObj.prePromptTemplate !== undefined
       ? { prePromptTemplate: rawObj.prePromptTemplate }
+      : {}),
+    ...(rawObj.postPromptTemplate !== undefined
+      ? { postPromptTemplate: rawObj.postPromptTemplate }
       : {}),
   };
 

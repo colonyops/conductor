@@ -12,6 +12,8 @@ import { type TransitionOpts, transition } from "./lifecycle.js";
 
 const CONDUCTOR_MARKER_START = "<!-- conductor:start -->";
 const CONDUCTOR_MARKER_END = "<!-- conductor:end -->";
+const CONDUCTOR_POST_MARKER_START = "<!-- conductor:post-start -->";
+const CONDUCTOR_POST_MARKER_END = "<!-- conductor:post-end -->";
 
 export async function injectHooks(
   workDir: string,
@@ -82,6 +84,33 @@ export async function injectPrePrompt(
   await Bun.write(claudeMdPath, content);
 }
 
+export async function injectPostPrompt(
+  workDir: string,
+  template: string,
+): Promise<void> {
+  const claudeMdPath = `${workDir}/CLAUDE.md`;
+  let content = "";
+  try {
+    content = await Bun.file(claudeMdPath).text();
+  } catch {
+    // file doesn't exist — will be created
+  }
+
+  const block = `${CONDUCTOR_POST_MARKER_START}\n${template}\n${CONDUCTOR_POST_MARKER_END}`;
+
+  if (content.includes(CONDUCTOR_POST_MARKER_START)) {
+    const re = new RegExp(
+      `${CONDUCTOR_POST_MARKER_START}[\\s\\S]*?${CONDUCTOR_POST_MARKER_END}`,
+      "g",
+    );
+    content = content.replace(re, block);
+  } else {
+    content = (content ? `${content}\n\n` : "") + block;
+  }
+
+  await Bun.write(claudeMdPath, content);
+}
+
 export function buildSession(
   id: string,
   name: string,
@@ -112,6 +141,7 @@ export interface CreateSessionOptions {
   agent?: string;
   idleTimeoutMs?: number;
   prePromptOverride?: string;
+  postPromptOverride?: string;
 }
 
 export interface SessionManagerDeps {
@@ -154,6 +184,12 @@ export class SessionManager {
       const template = opts.prePromptOverride ?? this.config.prePromptTemplate;
       if (template) {
         await injectPrePrompt(workDir, template);
+      }
+
+      const postTemplate =
+        opts.postPromptOverride ?? this.config.postPromptTemplate;
+      if (postTemplate) {
+        await injectPostPrompt(workDir, postTemplate);
       }
 
       const session = buildSession(

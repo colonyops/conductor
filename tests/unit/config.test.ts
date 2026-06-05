@@ -163,6 +163,29 @@ describe("validateConfig", () => {
     const { errors } = validateConfig({ prePromptTemplate: 42 });
     expect(errors.some((e) => e.field === "prePromptTemplate")).toBe(true);
   });
+
+  it("accepts valid postPromptTemplate", () => {
+    const { config, errors } = validateConfig({
+      postPromptTemplate: "When done, open a draft PR.",
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.postPromptTemplate).toBe("When done, open a draft PR.");
+  });
+
+  it("rejects non-string postPromptTemplate", () => {
+    const { errors } = validateConfig({ postPromptTemplate: 42 });
+    expect(errors.some((e) => e.field === "postPromptTemplate")).toBe(true);
+  });
+
+  it("accepts both prePromptTemplate and postPromptTemplate together", () => {
+    const { config, errors } = validateConfig({
+      prePromptTemplate: "You are headless.",
+      postPromptTemplate: "Open a draft PR when done.",
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.prePromptTemplate).toBe("You are headless.");
+    expect(config.postPromptTemplate).toBe("Open a draft PR when done.");
+  });
 });
 
 describe("resolvePath", () => {
