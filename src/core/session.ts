@@ -142,8 +142,8 @@ export class SessionManager {
       const { id, workDir } = await hiveNew({
         name: opts.name,
         remote: opts.remote,
-        prompt: opts.context,
-        agent: opts.agent,
+        ...(opts.context !== undefined ? { prompt: opts.context } : {}),
+        ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
       });
 
       // Ensure events dir exists

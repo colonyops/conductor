@@ -124,7 +124,6 @@ interface NewSessionOptions {
   name:              string;
   remote:            string;          // git remote URL
   context?:          string;          // extra text appended to the pre-prompt
-  cloneStrategy?:    "full" | "worktree";
   agent?:            string;
   idleTimeoutMs?:    number;          // overrides config for this session only
   prePromptOverride?: string;         // replaces the global prePromptTemplate
@@ -168,7 +167,6 @@ const session = await ctx.hive.newSession({
   name: "issue-123",
   remote: "https://github.com/owner/repo",
   context: "Fix the bug described in issue #123",
-  cloneStrategy: "worktree",
 });
 
 ctx.hive.onSessionComplete(async ({ session }) => {
@@ -375,7 +373,6 @@ export default definePlugin({
             name: \`work-\${item.id}\`,
             remote: "https://github.com/acme/repo",
             context: \`Work item \${item.id}: \${item.title}\\n\${item.url}\`,
-            cloneStrategy: "worktree",
           });
         } catch (err) {
           ctx.logger.error("failed to create session", {

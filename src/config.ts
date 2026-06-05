@@ -72,7 +72,6 @@ const GITHUB_ISSUES_DEFAULTS: GitHubIssuesBuiltinConfig = {
   repo: "",
   labels: [],
   pollIntervalMs: 300_000,
-  cloneStrategy: "full",
 };
 
 function buildBuiltins(
@@ -90,7 +89,6 @@ function buildBuiltins(
       labels: gi.labels ?? GITHUB_ISSUES_DEFAULTS.labels,
       pollIntervalMs:
         gi.pollIntervalMs ?? GITHUB_ISSUES_DEFAULTS.pollIntervalMs,
-      cloneStrategy: gi.cloneStrategy ?? GITHUB_ISSUES_DEFAULTS.cloneStrategy,
       ...(gi.inProgressLabel !== undefined
         ? { inProgressLabel: gi.inProgressLabel }
         : {}),
@@ -172,16 +170,6 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
     errors.push({
       field: `${p}.pollIntervalMs`,
       message: "must be a positive number",
-    });
-  }
-  if (
-    raw.cloneStrategy !== undefined &&
-    raw.cloneStrategy !== "full" &&
-    raw.cloneStrategy !== "worktree"
-  ) {
-    errors.push({
-      field: `${p}.cloneStrategy`,
-      message: 'must be "full" or "worktree"',
     });
   }
   if (

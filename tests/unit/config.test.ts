@@ -148,7 +148,7 @@ describe("validateConfig", () => {
     expect(errors).toHaveLength(0);
     expect(config.builtins["github-issues"]?.repo).toBe("owner/repo");
     expect(config.builtins["github-issues"]?.pollIntervalMs).toBe(300_000);
-    expect(config.builtins["github-issues"]?.cloneStrategy).toBe("full");
+    expect(config.builtins["github-issues"]?.tokenSource).toBe("secret");
   });
 
   it("accepts valid prePromptTemplate", () => {

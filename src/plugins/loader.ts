@@ -327,7 +327,6 @@ export async function loadPlugins(opts: {
     process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(
       giConfig.pollIntervalMs,
     );
-    process.env.CONDUCTOR_GITHUB_CLONE_STRATEGY = giConfig.cloneStrategy;
     process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY = giConfig.tokenSecretKey;
     process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = giConfig.tokenSource;
     if (giConfig.inProgressLabel) {
