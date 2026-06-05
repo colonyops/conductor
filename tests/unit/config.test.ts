@@ -142,6 +142,46 @@ describe("validateConfig", () => {
     expect(config.builtins["github-issues"]?.tokenSource).toBe("secret");
   });
 
+  it("accepts assignee field in github-issues builtin", () => {
+    const { config, errors } = validateConfig({
+      builtins: {
+        "github-issues": {
+          repo: "owner/repo",
+          labels: ["conductor"],
+          assignee: "hay-kot",
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.builtins["github-issues"]?.assignee).toBe("hay-kot");
+  });
+
+  it("omits assignee from github-issues builtin when not set", () => {
+    const { config, errors } = validateConfig({
+      builtins: {
+        "github-issues": {
+          repo: "owner/repo",
+          labels: ["conductor"],
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.builtins["github-issues"]?.assignee).toBeUndefined();
+  });
+
+  it("rejects non-string assignee in github-issues builtin", () => {
+    const { errors } = validateConfig({
+      builtins: {
+        "github-issues": {
+          repo: "owner/repo",
+          labels: ["conductor"],
+          assignee: 42,
+        },
+      },
+    });
+    expect(errors.some((e) => e.field.includes("assignee"))).toBe(true);
+  });
+
   it("accepts valid prePromptTemplate", () => {
     const { config, errors } = validateConfig({
       prePromptTemplate: "You are an agent.",
