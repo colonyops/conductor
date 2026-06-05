@@ -10,6 +10,18 @@ import { type TransitionOpts, transition } from "./lifecycle.js";
 
 // ── Hook injection helpers ────────────────────────────────────────────────────
 
+// Returns the absolute command prefix for conductor signal invocations.
+// When running from source via `bun run` (dev mode), process.argv[1] is the
+// .ts entry point; we use `bun <script>` so the hook resolves without
+// `conductor` on PATH. When running as a compiled binary, process.execPath
+// is the binary itself.
+export function resolveSignalInvocation(): string {
+  if (process.argv[1]?.endsWith(".ts")) {
+    return `${process.execPath} ${process.argv[1]}`;
+  }
+  return process.execPath;
+}
+
 export async function injectHooks(workDir: string, sessionId: string): Promise<void> {
   const claudeDir = `${workDir}/.claude`;
   const settingsPath = `${claudeDir}/settings.local.json`;
@@ -21,6 +33,7 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
   }
 
   const hooks = (existing.hooks as Record<string, unknown> | undefined) ?? {};
+  const invocation = resolveSignalInvocation();
 
   existing.hooks = {
     ...hooks,
@@ -29,7 +42,7 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
         hooks: [
           {
             type: "command",
-            command: `conductor signal stop --session ${sessionId}`,
+            command: `${invocation} signal stop --session ${sessionId}`,
           },
         ],
       },
@@ -39,7 +52,7 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
         hooks: [
           {
             type: "command",
-            command: `conductor signal activity --session ${sessionId}`,
+            command: `${invocation} signal activity --session ${sessionId}`,
           },
         ],
       },
@@ -52,8 +65,8 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
     ...permissions,
     allow: [
       ...allow,
-      `Bash(conductor signal stop --session ${sessionId})`,
-      `Bash(conductor signal activity --session ${sessionId})`,
+      `Bash(${invocation} signal stop --session ${sessionId})`,
+      `Bash(${invocation} signal activity --session ${sessionId})`,
     ],
   };
 
