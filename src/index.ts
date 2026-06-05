@@ -45,6 +45,7 @@ program
         config,
         eventBus,
         globalLimiter,
+        logger,
       });
 
       const { registry, metrics } = createMetrics();

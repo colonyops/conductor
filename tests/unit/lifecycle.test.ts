@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import { transition } from "../../src/core/lifecycle.js";
 import type { Session } from "../../src/types.js";
 

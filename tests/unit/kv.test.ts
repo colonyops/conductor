@@ -1,7 +1,6 @@
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openKVDatabase } from "../../src/sdk/kv.js";
 
 const TEST_DIR = join(tmpdir(), `conductor-kv-test-${process.pid}`);
@@ -27,16 +26,16 @@ describe("BunSqliteKVStore", () => {
     await store.set("str", "hello");
     await store.set("num", 42);
     await store.set("bool", true);
-    expect(await store.get("str")).toBe("hello");
-    expect(await store.get("num")).toBe(42);
-    expect(await store.get("bool")).toBe(true);
+    expect(await store.get<string>("str")).toBe("hello");
+    expect(await store.get<number>("num")).toBe(42);
+    expect(await store.get<boolean>("bool")).toBe(true);
   });
 
   it("set then get round-trips nested objects", async () => {
     const store = db.forPlugin("plugin-a");
     const obj = { foo: { bar: [1, 2, 3] } };
     await store.set("nested", obj);
-    expect(await store.get("nested")).toEqual(obj);
+    expect(await store.get<typeof obj>("nested")).toEqual(obj);
   });
 
   it("has returns true for existing key, false otherwise", async () => {
@@ -91,8 +90,8 @@ describe("BunSqliteKVStore", () => {
       const b = db.forPlugin("iso-b");
       await a.set("shared", "from-a");
       await b.set("shared", "from-b");
-      expect(await a.get("shared")).toBe("from-a");
-      expect(await b.get("shared")).toBe("from-b");
+      expect(await a.get<string>("shared")).toBe("from-a");
+      expect(await b.get<string>("shared")).toBe("from-b");
     });
 
     it("clear only deletes keys for that plugin", async () => {
@@ -102,7 +101,7 @@ describe("BunSqliteKVStore", () => {
       await b.set("key", "b-value");
       await a.clear();
       expect(await a.has("key")).toBe(false);
-      expect(await b.get("key")).toBe("b-value");
+      expect(await b.get<string>("key")).toBe("b-value");
     });
   });
 

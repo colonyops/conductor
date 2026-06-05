@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "../../src/sdk/logger.js";
 import { createScheduler } from "../../src/sdk/scheduler.js";
 

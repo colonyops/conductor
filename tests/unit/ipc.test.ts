@@ -1,7 +1,6 @@
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 // Set the override env var BEFORE importing ipc.ts so CONDUCTOR_DATA_DIR
 // is resolved to our temp dir when the module initializes.

@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSecretsClient } from "../../src/sdk/secrets.js";
 
 describe("createSecretsClient", () => {
@@ -48,9 +47,9 @@ describe("createSecretsClient", () => {
         stdout: new Response("keychain-secret\n").body,
         stderr: new Response("").body,
       };
-      vi.spyOn(Bun, "spawn").mockReturnValueOnce(
-        mockProc as ReturnType<typeof Bun.spawn>,
-      );
+      jest
+        .spyOn(Bun, "spawn")
+        .mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
 
       const savedPlatform = process.platform;
       // Temporarily override platform
@@ -68,7 +67,7 @@ describe("createSecretsClient", () => {
           value: savedPlatform,
           configurable: true,
         });
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
       }
     });
 
@@ -78,9 +77,9 @@ describe("createSecretsClient", () => {
         stdout: new Response("").body,
         stderr: new Response("not found").body,
       };
-      vi.spyOn(Bun, "spawn").mockReturnValueOnce(
-        mockProc as ReturnType<typeof Bun.spawn>,
-      );
+      jest
+        .spyOn(Bun, "spawn")
+        .mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
 
       const savedPlatform = process.platform;
       Object.defineProperty(process, "platform", {
@@ -98,7 +97,7 @@ describe("createSecretsClient", () => {
           value: savedPlatform,
           configurable: true,
         });
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
       }
     });
   });

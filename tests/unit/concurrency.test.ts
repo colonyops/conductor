@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import { createConcurrencyLimiter } from "../../src/sdk/concurrency.js";
 
 describe("createConcurrencyLimiter", () => {

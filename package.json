@@ -7,10 +7,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ tests/",
     "format": "biome format --write src/ tests/",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:integration": "vitest run --project integration",
-    "test:e2e": "vitest run --project e2e"
+    "test": "bun test tests/unit/",
+    "test:watch": "bun test --watch tests/unit/",
+    "test:integration": "bun test tests/integration/scenarios/ --timeout=120000",
+    "test:e2e": "bun test tests/e2e/"
   },
   "dependencies": {
     "commander": "^12.1.0",
@@ -18,7 +18,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "vitest": "^2.1.8",
     "typescript": "^5.7.3",
     "@types/bun": "latest"
   }

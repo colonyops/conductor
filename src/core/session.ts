@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
+import type { Logger } from "../sdk/logger.js";
 import type { Session, SessionEvent } from "../types.js";
 import type { EventBus } from "./events.js";
 import { hiveNew, hiveRecycle } from "./hive-client.js";
@@ -118,6 +119,7 @@ export interface SessionManagerDeps {
   config: ConductorConfig;
   eventBus: EventBus;
   globalLimiter: ConcurrencyLimiter;
+  logger?: Logger;
 }
 
 export class SessionManager {
@@ -126,11 +128,13 @@ export class SessionManager {
   private readonly config: ConductorConfig;
   private readonly eventBus: EventBus;
   private readonly globalLimiter: ConcurrencyLimiter;
+  private readonly logger: Logger | undefined;
 
   constructor(deps: SessionManagerDeps) {
     this.config = deps.config;
     this.eventBus = deps.eventBus;
     this.globalLimiter = deps.globalLimiter;
+    this.logger = deps.logger;
   }
 
   async createSession(opts: CreateSessionOptions): Promise<Session> {
@@ -196,6 +200,15 @@ export class SessionManager {
       transitionOpts.isApprovalPending = opts.isApprovalPending;
     }
     const result = transition(session, event, transitionOpts);
+
+    if (result.nextState !== session.state) {
+      this.logger?.info("session state transition", {
+        sessionId,
+        from: session.state,
+        to: result.nextState,
+        event,
+      });
+    }
 
     // Update session state in place
     const updatedSession: Session = { ...session, state: result.nextState };
