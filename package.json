@@ -12,7 +12,8 @@
     "test:watch": "bun test --watch tests/unit/",
     "test:integration": "bun test tests/integration/scenarios/ --timeout=120000",
     "test:e2e": "bun test tests/e2e/",
-    "build": "bun build src/index.ts --outfile dist/conductor.js"
+    "build": "bun build src/index.ts --outfile dist/conductor.js",
+    "prepare": "git config --local core.hooksPath .git/hooks && lefthook install --force"
   },
   "dependencies": {
     "commander": "^12.1.0",
@@ -20,7 +21,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "typescript": "^5.7.3",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "lefthook": "^2.1.9",
+    "typescript": "^5.7.3"
   }
 }
