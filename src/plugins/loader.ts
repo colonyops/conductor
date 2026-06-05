@@ -1,9 +1,5 @@
 import { createInterface } from "node:readline";
-import {
-  type ConductorConfig,
-  resolvePath,
-  writeConfig,
-} from "../config.js";
+import { type ConductorConfig, resolvePath, writeConfig } from "../config.js";
 import type { EventBus } from "../core/events.js";
 import type { SessionManager } from "../core/session.js";
 import { createHiveClient } from "../sdk/hive.js";
@@ -11,7 +7,7 @@ import type { HiveClient } from "../sdk/hive.js";
 import { createHttpClient } from "../sdk/http.js";
 import type { KVStore } from "../sdk/kv.js";
 import type { openKVDatabase } from "../sdk/kv.js";
-import { type Logger, createLogger } from "../sdk/logger.js";
+import type { Logger } from "../sdk/logger.js";
 import { createScheduler } from "../sdk/scheduler.js";
 import type { SecretsClient } from "../sdk/secrets.js";
 import type { Plugin, PluginMeta } from "../types.js";
@@ -257,12 +253,7 @@ export async function loadPlugins(opts: {
       continue;
     }
 
-    const pluginLogger = createLogger({
-      pluginName: plugin.name,
-      logPath: resolvePath(config.observability.logPath),
-      logMaxBytes: config.observability.logMaxBytes,
-      logMaxBackups: config.observability.logMaxBackups,
-    });
+    const pluginLogger = globalLogger.with({ component: plugin.name });
     const scheduler = createScheduler(pluginLogger);
     const kv: KVStore = kvDatabase.forPlugin(plugin.id);
     const unsubscribes: Array<() => void> = [];
@@ -349,12 +340,7 @@ export async function loadPlugins(opts: {
     }
 
     const plugin = builtinModule.default;
-    const pluginLogger = createLogger({
-      pluginName: plugin.name,
-      logPath: resolvePath(config.observability.logPath),
-      logMaxBytes: config.observability.logMaxBytes,
-      logMaxBackups: config.observability.logMaxBackups,
-    });
+    const pluginLogger = globalLogger.with({ component: plugin.name });
     const scheduler = createScheduler(pluginLogger);
     const kv: KVStore = kvDatabase.forPlugin(plugin.id);
     const unsubscribes: Array<() => void> = [];

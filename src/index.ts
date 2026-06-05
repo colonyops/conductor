@@ -447,10 +447,12 @@ program
       const config = loadConfig(opts.config);
       const configPath = resolveConfigPath(opts.config);
       const logger = createLogger({
-        pluginName: "conductor",
+        component: "conductor",
         logPath: resolvePath(config.observability.logPath),
         logMaxBytes: config.observability.logMaxBytes,
         logMaxBackups: config.observability.logMaxBackups,
+        format: config.observability.logFormat,
+        caller: config.observability.logCaller,
       });
       const kvDatabase = openKVDatabase(CONDUCTOR_DATA_DIR);
       const secrets = createSecretsClient();
