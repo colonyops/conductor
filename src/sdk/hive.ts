@@ -12,9 +12,7 @@ export interface NewSessionOptions {
   postPromptOverride?: string;
 }
 
-type SessionEventHandler<E extends CoreEventName> = (
-  payload: CoreEventPayload<E>,
-) => Promise<void>;
+type SessionEventHandler<E extends CoreEventName> = (payload: CoreEventPayload<E>) => Promise<void>;
 
 export interface HiveClient {
   newSession(opts: NewSessionOptions): Promise<Session>;
@@ -24,15 +22,9 @@ export interface HiveClient {
   onSessionCreated(handler: SessionEventHandler<"sessionCreated">): () => void;
   onSessionActive(handler: SessionEventHandler<"sessionActive">): () => void;
   onSessionIdle(handler: SessionEventHandler<"sessionIdle">): () => void;
-  onSessionComplete(
-    handler: SessionEventHandler<"sessionComplete">,
-  ): () => void;
-  onSessionRecycled(
-    handler: SessionEventHandler<"sessionRecycled">,
-  ): () => void;
-  onSessionApproval(
-    handler: SessionEventHandler<"sessionApproval">,
-  ): () => void;
+  onSessionComplete(handler: SessionEventHandler<"sessionComplete">): () => void;
+  onSessionRecycled(handler: SessionEventHandler<"sessionRecycled">): () => void;
+  onSessionApproval(handler: SessionEventHandler<"sessionApproval">): () => void;
   onSessionError(handler: SessionEventHandler<"sessionError">): () => void;
 }
 
@@ -43,10 +35,7 @@ export function createHiveClient(opts: {
 }): HiveClient {
   const { pluginId, sessionManager, eventBus } = opts;
 
-  function sub<E extends CoreEventName>(
-    name: E,
-    handler: SessionEventHandler<E>,
-  ): () => void {
+  function sub<E extends CoreEventName>(name: E, handler: SessionEventHandler<E>): () => void {
     return eventBus.on(name, handler);
   }
 

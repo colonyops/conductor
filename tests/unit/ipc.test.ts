@@ -7,8 +7,7 @@ import { join } from "node:path";
 const TEST_DATA_DIR = join(tmpdir(), `conductor-ipc-test-${process.pid}`);
 process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE = TEST_DATA_DIR;
 
-const { writeIpcEvent, drainEventFiles, sessionEventsDir, watchIpcEvents } =
-  await import("../../src/core/ipc.js");
+const { writeIpcEvent, drainEventFiles, sessionEventsDir, watchIpcEvents } = await import("../../src/core/ipc.js");
 
 afterAll(() => {
   process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE = undefined;
@@ -42,9 +41,7 @@ describe("writeIpcEvent", () => {
     const eventsDir = sessionEventsDir("sess-2");
     const [filename] = readdirSync(eventsDir);
     if (!filename) throw new Error("no file written");
-    const content = JSON.parse(
-      await Bun.file(join(eventsDir, filename)).text(),
-    );
+    const content = JSON.parse(await Bun.file(join(eventsDir, filename)).text());
     expect(content).toMatchObject({
       signal: "stop",
       sessionId: "sess-2",
@@ -83,10 +80,7 @@ describe("drainEventFiles", () => {
       sessionId: "sess-sort",
       timestamp: "2026-01-01T00:00:02Z",
     };
-    await Bun.write(
-      join(eventsDir, "1000-activity.json"),
-      JSON.stringify(event1),
-    );
+    await Bun.write(join(eventsDir, "1000-activity.json"), JSON.stringify(event1));
     await Bun.write(join(eventsDir, "2000-stop.json"), JSON.stringify(event2));
 
     const drained = await drainEventFiles("sess-sort");

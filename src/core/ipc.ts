@@ -4,18 +4,13 @@ import { join } from "node:path";
 import { resolvePath } from "../config.js";
 import type { IpcEvent, IpcSignal } from "../types.js";
 
-export const CONDUCTOR_DATA_DIR =
-  process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ??
-  resolvePath("~/.local/conductor");
+export const CONDUCTOR_DATA_DIR = process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ?? resolvePath("~/.local/conductor");
 
 export function sessionEventsDir(sessionId: string): string {
   return join(CONDUCTOR_DATA_DIR, "sessions", sessionId, "events");
 }
 
-export async function writeIpcEvent(
-  sessionId: string,
-  signal: IpcSignal,
-): Promise<void> {
+export async function writeIpcEvent(sessionId: string, signal: IpcSignal): Promise<void> {
   const eventsDir = sessionEventsDir(sessionId);
   mkdirSync(eventsDir, { recursive: true });
 
@@ -73,41 +68,37 @@ export function watchIpcEvents(handler: IpcEventHandler): { stop(): void } {
   // parsing entirely and scan all session subdirectories instead.
   let draining = false;
 
-  const watcher = watch(
-    sessionsDir,
-    { recursive: true },
-    (_eventType, filename) => {
-      if (!filename) return;
-      if (!filename.endsWith(".json")) return;
-      if (draining) return;
-      draining = true;
+  const watcher = watch(sessionsDir, { recursive: true }, (_eventType, filename) => {
+    if (!filename) return;
+    if (!filename.endsWith(".json")) return;
+    if (draining) return;
+    draining = true;
 
-      void (async () => {
-        try {
-          const entries = readdirSync(sessionsDir);
-          for (const entry of entries) {
+    void (async () => {
+      try {
+        const entries = readdirSync(sessionsDir);
+        for (const entry of entries) {
+          try {
+            if (!statSync(join(sessionsDir, entry)).isDirectory()) continue;
+          } catch {
+            continue;
+          }
+          const events = await drainEventFiles(entry);
+          for (const event of events) {
             try {
-              if (!statSync(join(sessionsDir, entry)).isDirectory()) continue;
+              await handler(event);
             } catch {
-              continue;
-            }
-            const events = await drainEventFiles(entry);
-            for (const event of events) {
-              try {
-                await handler(event);
-              } catch {
-                // handler errors don't kill the watcher
-              }
+              // handler errors don't kill the watcher
             }
           }
-        } catch {
-          // ignore scan errors
-        } finally {
-          draining = false;
         }
-      })();
-    },
-  );
+      } catch {
+        // ignore scan errors
+      } finally {
+        draining = false;
+      }
+    })();
+  });
 
   return { stop: () => watcher.close() };
 }

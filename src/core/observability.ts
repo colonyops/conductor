@@ -108,10 +108,7 @@ export function createMetrics(): {
   };
 }
 
-export function startMetricsServer(
-  port: number,
-  registry: Registry,
-): { stop(): void } {
+export function startMetricsServer(port: number, registry: Registry): { stop(): void } {
   const server = Bun.serve({
     port,
     async fetch(req) {

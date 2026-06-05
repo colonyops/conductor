@@ -37,11 +37,7 @@ export interface TransitionOpts {
  *   APPROVAL + ApprovalResolved          → ACTIVE   [startIdleTimer, emitSessionActive]
  *   COMPLETE + *                         → no-op
  */
-export function transition(
-  session: Session,
-  event: SessionEvent,
-  opts: TransitionOpts,
-): TransitionResult {
+export function transition(session: Session, event: SessionEvent, opts: TransitionOpts): TransitionResult {
   const { state } = session;
   const { idleTimeoutMs, isApprovalPending = false } = opts;
 
@@ -159,10 +155,7 @@ export function transition(
     };
   }
 
-  if (
-    state === "APPROVAL" &&
-    (event === "PostToolUse" || event === "ApprovalResolved")
-  ) {
+  if (state === "APPROVAL" && (event === "PostToolUse" || event === "ApprovalResolved")) {
     return {
       nextState: "ACTIVE",
       actions: [
@@ -176,7 +169,5 @@ export function transition(
     };
   }
 
-  throw new Error(
-    `Invalid state transition: ${state} + ${event}${isApprovalPending ? " (approval pending)" : ""}`,
-  );
+  throw new Error(`Invalid state transition: ${state} + ${event}${isApprovalPending ? " (approval pending)" : ""}`);
 }

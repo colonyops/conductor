@@ -28,49 +28,39 @@ export class BunSqliteKVStore implements KVStore {
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     const row = this.db
-      .query<KVRow, [string, string]>(
-        "SELECT value FROM kv WHERE plugin_id = ? AND key = ?",
-      )
+      .query<KVRow, [string, string]>("SELECT value FROM kv WHERE plugin_id = ? AND key = ?")
       .get(this.pluginId, key);
     if (!row) return undefined;
     return JSON.parse(row.value) as T;
   }
 
   async set<T = unknown>(key: string, value: T): Promise<void> {
-    this.db.run(
-      "INSERT OR REPLACE INTO kv (plugin_id, key, value) VALUES (?, ?, ?)",
-      [this.pluginId, key, JSON.stringify(value)],
-    );
+    this.db.run("INSERT OR REPLACE INTO kv (plugin_id, key, value) VALUES (?, ?, ?)", [
+      this.pluginId,
+      key,
+      JSON.stringify(value),
+    ]);
   }
 
   async has(key: string): Promise<boolean> {
     const row = this.db
-      .query<CountRow, [string, string]>(
-        "SELECT COUNT(*) as c FROM kv WHERE plugin_id = ? AND key = ?",
-      )
+      .query<CountRow, [string, string]>("SELECT COUNT(*) as c FROM kv WHERE plugin_id = ? AND key = ?")
       .get(this.pluginId, key);
     return (row?.c ?? 0) > 0;
   }
 
   async delete(key: string): Promise<void> {
-    this.db.run("DELETE FROM kv WHERE plugin_id = ? AND key = ?", [
-      this.pluginId,
-      key,
-    ]);
+    this.db.run("DELETE FROM kv WHERE plugin_id = ? AND key = ?", [this.pluginId, key]);
   }
 
   async keys(prefix?: string): Promise<string[]> {
     if (prefix !== undefined) {
       const rows = this.db
-        .query<KeyRow, [string, string]>(
-          "SELECT key FROM kv WHERE plugin_id = ? AND key LIKE ? || '%'",
-        )
+        .query<KeyRow, [string, string]>("SELECT key FROM kv WHERE plugin_id = ? AND key LIKE ? || '%'")
         .all(this.pluginId, prefix);
       return rows.map((r) => r.key);
     }
-    const rows = this.db
-      .query<KeyRow, [string]>("SELECT key FROM kv WHERE plugin_id = ?")
-      .all(this.pluginId);
+    const rows = this.db.query<KeyRow, [string]>("SELECT key FROM kv WHERE plugin_id = ?").all(this.pluginId);
     return rows.map((r) => r.key);
   }
 
@@ -106,9 +96,7 @@ export function openKVDatabase(dataDir: string): {
     listEntries(pluginId?: string): KVEntry[] {
       if (pluginId !== undefined) {
         const rows = db
-          .query<AllKeyRow, [string]>(
-            "SELECT plugin_id, key, value FROM kv WHERE plugin_id = ? ORDER BY key",
-          )
+          .query<AllKeyRow, [string]>("SELECT plugin_id, key, value FROM kv WHERE plugin_id = ? ORDER BY key")
           .all(pluginId);
         return rows.map((r) => ({
           pluginId: r.plugin_id,
@@ -116,11 +104,7 @@ export function openKVDatabase(dataDir: string): {
           value: r.value,
         }));
       }
-      const rows = db
-        .query<AllKeyRow, []>(
-          "SELECT plugin_id, key, value FROM kv ORDER BY plugin_id, key",
-        )
-        .all();
+      const rows = db.query<AllKeyRow, []>("SELECT plugin_id, key, value FROM kv ORDER BY plugin_id, key").all();
       return rows.map((r) => ({
         pluginId: r.plugin_id,
         key: r.key,

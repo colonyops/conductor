@@ -3,10 +3,7 @@ import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 import { byMsg, parseLog } from "../helpers/logUtils.js";
 
-const SCHEDULER_SIGTERM = join(
-  import.meta.dir,
-  "../fixtures/plugins/scheduler-sigterm.plugin.ts",
-);
+const SCHEDULER_SIGTERM = join(import.meta.dir, "../fixtures/plugins/scheduler-sigterm.plugin.ts");
 
 describe("12 — SIGTERM during active scheduler callback", () => {
   let env: TestEnv;

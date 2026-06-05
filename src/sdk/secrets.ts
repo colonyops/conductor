@@ -24,28 +24,20 @@ export interface SecretsClient {
 async function keychainGet(key: string): Promise<string | undefined> {
   try {
     if (process.platform === "darwin") {
-      const proc = Bun.spawn(
-        [
-          "security",
-          "find-generic-password",
-          "-s",
-          "conductor",
-          "-a",
-          key,
-          "-w",
-        ],
-        { stdout: "pipe", stderr: "pipe" },
-      );
+      const proc = Bun.spawn(["security", "find-generic-password", "-s", "conductor", "-a", key, "-w"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const code = await proc.exited;
       if (code !== 0) return undefined;
       const out = await new Response(proc.stdout).text();
       return out.trim() || undefined;
     }
     if (process.platform === "linux") {
-      const proc = Bun.spawn(
-        ["secret-tool", "lookup", "service", "conductor", "username", key],
-        { stdout: "pipe", stderr: "pipe" },
-      );
+      const proc = Bun.spawn(["secret-tool", "lookup", "service", "conductor", "username", key], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const code = await proc.exited;
       if (code !== 0) return undefined;
       const out = await new Response(proc.stdout).text();
@@ -60,35 +52,16 @@ async function keychainGet(key: string): Promise<string | undefined> {
 async function keychainSet(key: string, value: string): Promise<void> {
   try {
     if (process.platform === "darwin") {
-      const proc = Bun.spawn(
-        [
-          "security",
-          "add-generic-password",
-          "-U",
-          "-s",
-          "conductor",
-          "-a",
-          key,
-          "-w",
-          value,
-        ],
-        { stdout: "pipe", stderr: "pipe" },
-      );
+      const proc = Bun.spawn(["security", "add-generic-password", "-U", "-s", "conductor", "-a", key, "-w", value], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       await proc.exited;
       return;
     }
     if (process.platform === "linux") {
       const proc = Bun.spawn(
-        [
-          "secret-tool",
-          "store",
-          "--label",
-          `conductor/${key}`,
-          "service",
-          "conductor",
-          "username",
-          key,
-        ],
+        ["secret-tool", "store", "--label", `conductor/${key}`, "service", "conductor", "username", key],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       );
       proc.stdin.write(value);

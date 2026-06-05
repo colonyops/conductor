@@ -3,14 +3,8 @@ import { openKVDatabase } from "../../../src/sdk/kv.js";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const KV_SCOPE_A = join(
-  import.meta.dir,
-  "../fixtures/plugins/kv-scope-a.plugin.ts",
-);
-const KV_SCOPE_B = join(
-  import.meta.dir,
-  "../fixtures/plugins/kv-scope-b.plugin.ts",
-);
+const KV_SCOPE_A = join(import.meta.dir, "../fixtures/plugins/kv-scope-a.plugin.ts");
+const KV_SCOPE_B = join(import.meta.dir, "../fixtures/plugins/kv-scope-b.plugin.ts");
 
 describe("10 — KV scope isolation", () => {
   let env: TestEnv;

@@ -2,12 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  CONFIG_DEFAULTS,
-  loadConfig,
-  resolvePath,
-  validateConfig,
-} from "../../src/config.js";
+import { CONFIG_DEFAULTS, loadConfig, resolvePath, validateConfig } from "../../src/config.js";
 
 describe("validateConfig", () => {
   it("returns defaults for empty object", () => {
@@ -65,9 +60,7 @@ describe("validateConfig", () => {
 
   it("accepts valid plugin entry", () => {
     const { config, errors } = validateConfig({
-      plugins: [
-        { path: "/some/plugin.ts", enabled: true, idleTimeoutMs: 5000 },
-      ],
+      plugins: [{ path: "/some/plugin.ts", enabled: true, idleTimeoutMs: 5000 }],
     });
     expect(errors).toHaveLength(0);
     expect(config.plugins[0]?.path).toBe("/some/plugin.ts");
@@ -106,9 +99,7 @@ describe("validateConfig", () => {
     const { errors } = validateConfig({
       observability: { metricsPort: 99999 },
     });
-    expect(errors.some((e) => e.field === "observability.metricsPort")).toBe(
-      true,
-    );
+    expect(errors.some((e) => e.field === "observability.metricsPort")).toBe(true);
   });
 
   it("validates github-issues builtin repo format", () => {
@@ -212,10 +203,7 @@ describe("loadConfig", () => {
   });
 
   it("loads and merges a valid config file", () => {
-    const dir = join(
-      tmpdir(),
-      `conductor-test-${Math.random().toString(36).slice(2)}`,
-    );
+    const dir = join(tmpdir(), `conductor-test-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
     const configPath = join(dir, "conductor.config.json");
     writeFileSync(configPath, JSON.stringify({ idleTimeoutMs: 12345 }));
@@ -230,10 +218,7 @@ describe("loadConfig", () => {
   });
 
   it("throws with field-level errors for invalid config", () => {
-    const dir = join(
-      tmpdir(),
-      `conductor-test-${Math.random().toString(36).slice(2)}`,
-    );
+    const dir = join(tmpdir(), `conductor-test-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
     const configPath = join(dir, "conductor.config.json");
     writeFileSync(configPath, JSON.stringify({ idleTimeoutMs: "bad" }));
@@ -246,10 +231,7 @@ describe("loadConfig", () => {
   });
 
   it("throws on malformed JSON", () => {
-    const dir = join(
-      tmpdir(),
-      `conductor-test-${Math.random().toString(36).slice(2)}`,
-    );
+    const dir = join(tmpdir(), `conductor-test-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
     const configPath = join(dir, "conductor.config.json");
     writeFileSync(configPath, "{ not valid json }");

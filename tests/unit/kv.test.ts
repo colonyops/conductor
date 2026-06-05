@@ -108,13 +108,9 @@ describe("BunSqliteKVStore", () => {
   describe("concurrent writes", () => {
     it("concurrent set/get do not corrupt data", async () => {
       const store = db.forPlugin("concurrent");
-      const writes = Array.from({ length: 20 }, (_, i) =>
-        store.set(`key-${i}`, i),
-      );
+      const writes = Array.from({ length: 20 }, (_, i) => store.set(`key-${i}`, i));
       await Promise.all(writes);
-      const reads = await Promise.all(
-        Array.from({ length: 20 }, (_, i) => store.get<number>(`key-${i}`)),
-      );
+      const reads = await Promise.all(Array.from({ length: 20 }, (_, i) => store.get<number>(`key-${i}`)));
       for (let i = 0; i < 20; i++) {
         expect(reads[i]).toBe(i);
       }

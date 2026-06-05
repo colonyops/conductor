@@ -16,25 +16,19 @@ describe("createSecretsClient", () => {
     it("falls through to keychain when env var is unset", async () => {
       // MY_SECRET is not set; keychain will also fail; should throw
       const client = createSecretsClient();
-      await expect(
-        client.get("test.key", { env: "MY_SECRET" }),
-      ).rejects.toThrow('Secret "test.key" not found');
+      await expect(client.get("test.key", { env: "MY_SECRET" })).rejects.toThrow('Secret "test.key" not found');
     });
   });
 
   describe("error when secret is unresolvable", () => {
     it("throws without promptIfMissing when not in env or keychain", async () => {
       const client = createSecretsClient();
-      await expect(client.get("definitely-not-set")).rejects.toThrow(
-        'Secret "definitely-not-set" not found',
-      );
+      await expect(client.get("definitely-not-set")).rejects.toThrow('Secret "definitely-not-set" not found');
     });
 
     it("throws for env resolution with no fallback", async () => {
       const client = createSecretsClient();
-      await expect(
-        client.get("missing", { env: "CONDUCTOR_TEST_MISSING_12345" }),
-      ).rejects.toThrow();
+      await expect(client.get("missing", { env: "CONDUCTOR_TEST_MISSING_12345" })).rejects.toThrow();
     });
   });
 
@@ -47,9 +41,7 @@ describe("createSecretsClient", () => {
         stdout: new Response("keychain-secret\n").body,
         stderr: new Response("").body,
       };
-      jest
-        .spyOn(Bun, "spawn")
-        .mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
+      jest.spyOn(Bun, "spawn").mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
 
       const savedPlatform = process.platform;
       // Temporarily override platform
@@ -77,9 +69,7 @@ describe("createSecretsClient", () => {
         stdout: new Response("").body,
         stderr: new Response("not found").body,
       };
-      jest
-        .spyOn(Bun, "spawn")
-        .mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
+      jest.spyOn(Bun, "spawn").mockReturnValueOnce(mockProc as ReturnType<typeof Bun.spawn>);
 
       const savedPlatform = process.platform;
       Object.defineProperty(process, "platform", {
@@ -89,9 +79,7 @@ describe("createSecretsClient", () => {
 
       try {
         const client = createSecretsClient();
-        await expect(client.get("missing-in-keychain")).rejects.toThrow(
-          "not found",
-        );
+        await expect(client.get("missing-in-keychain")).rejects.toThrow("not found");
       } finally {
         Object.defineProperty(process, "platform", {
           value: savedPlatform,

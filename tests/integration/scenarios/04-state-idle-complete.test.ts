@@ -3,10 +3,7 @@ import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 import { byMsgData, pollLog } from "../helpers/logUtils.js";
 
-const SESSION_CREATOR = join(
-  import.meta.dir,
-  "../fixtures/plugins/session-creator.plugin.ts",
-);
+const SESSION_CREATOR = join(import.meta.dir, "../fixtures/plugins/session-creator.plugin.ts");
 
 describe("04 — state machine: IDLE → COMPLETE via idle timer", () => {
   let env: TestEnv;
@@ -37,26 +34,14 @@ describe("04 — state machine: IDLE → COMPLETE via idle timer", () => {
 
     // Drive CREATED → ACTIVE
     await daemon.signal("activity", session.id);
-    await pollLog(
-      env.logPath,
-      byMsgData("session state transition", { to: "ACTIVE" }),
-      5_000,
-    );
+    await pollLog(env.logPath, byMsgData("session state transition", { to: "ACTIVE" }), 5_000);
 
     // Drive ACTIVE → IDLE
     await daemon.signal("stop", session.id);
-    await pollLog(
-      env.logPath,
-      byMsgData("session state transition", { to: "IDLE" }),
-      5_000,
-    );
+    await pollLog(env.logPath, byMsgData("session state transition", { to: "IDLE" }), 5_000);
 
     // Idle timer fires after 2s → COMPLETE
-    const completeEntry = await pollLog(
-      env.logPath,
-      byMsgData("session state transition", { to: "COMPLETE" }),
-      6_000,
-    );
+    const completeEntry = await pollLog(env.logPath, byMsgData("session state transition", { to: "COMPLETE" }), 6_000);
     expect(completeEntry.data?.from).toBe("IDLE");
   }, 20_000);
 });

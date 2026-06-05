@@ -3,10 +3,7 @@ import { openKVDatabase } from "../../../src/sdk/kv.js";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const POLLING_DEDUP = join(
-  import.meta.dir,
-  "../fixtures/plugins/polling-dedup.plugin.ts",
-);
+const POLLING_DEDUP = join(import.meta.dir, "../fixtures/plugins/polling-dedup.plugin.ts");
 
 describe("05 — KV dedup", () => {
   let env: TestEnv;

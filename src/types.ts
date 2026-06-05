@@ -7,18 +7,9 @@ import type { SecretsClient } from "./sdk/secrets.js";
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
-export type SessionState =
-  | "CREATED"
-  | "ACTIVE"
-  | "IDLE"
-  | "APPROVAL"
-  | "COMPLETE";
+export type SessionState = "CREATED" | "ACTIVE" | "IDLE" | "APPROVAL" | "COMPLETE";
 
-export type SessionEvent =
-  | "PostToolUse"
-  | "Stop"
-  | "IdleTimeout"
-  | "ApprovalResolved";
+export type SessionEvent = "PostToolUse" | "Stop" | "IdleTimeout" | "ApprovalResolved";
 
 export interface Session {
   id: string;

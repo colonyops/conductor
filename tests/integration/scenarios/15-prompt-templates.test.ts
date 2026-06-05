@@ -6,15 +6,11 @@ const CONTEXT = "Fix the bug in issue #42.";
 
 describe("15 — buildPromptWithTemplates", () => {
   it("returns context unchanged when no templates are set", () => {
-    expect(buildPromptWithTemplates(CONTEXT, undefined, undefined)).toBe(
-      CONTEXT,
-    );
+    expect(buildPromptWithTemplates(CONTEXT, undefined, undefined)).toBe(CONTEXT);
   });
 
   it("returns undefined when no context and no templates", () => {
-    expect(buildPromptWithTemplates(undefined, undefined, undefined)).toBe(
-      undefined,
-    );
+    expect(buildPromptWithTemplates(undefined, undefined, undefined)).toBe(undefined);
   });
 
   it("prepends pre-template before context", () => {

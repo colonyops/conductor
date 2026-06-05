@@ -72,11 +72,7 @@ describe("createConcurrencyLimiter", () => {
 
   it("active returns to 0 after all releases", async () => {
     const limiter = createConcurrencyLimiter(3);
-    const [r1, r2, r3] = await Promise.all([
-      limiter.acquire(),
-      limiter.acquire(),
-      limiter.acquire(),
-    ]);
+    const [r1, r2, r3] = await Promise.all([limiter.acquire(), limiter.acquire(), limiter.acquire()]);
     expect(limiter.active).toBe(3);
     r1();
     r2();

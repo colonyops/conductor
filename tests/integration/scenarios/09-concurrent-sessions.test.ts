@@ -2,10 +2,7 @@ import { join } from "node:path";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const CONCURRENT_CREATOR = join(
-  import.meta.dir,
-  "../fixtures/plugins/concurrent-creator.plugin.ts",
-);
+const CONCURRENT_CREATOR = join(import.meta.dir, "../fixtures/plugins/concurrent-creator.plugin.ts");
 
 describe("09 — concurrent session creation", () => {
   let env: TestEnv;
@@ -32,10 +29,7 @@ describe("09 — concurrent session creation", () => {
   it("creates all 12 sessions despite a global concurrency limit of 5", async () => {
     // All sessions are created during plugin init(), so they're already present
     // by the time waitForReady() returns. Poll briefly for any stragglers.
-    const sessions = await env.pollHiveSessions(
-      (ss) => ss.length === 12,
-      30_000,
-    );
+    const sessions = await env.pollHiveSessions((ss) => ss.length === 12, 30_000);
     expect(sessions.length).toBe(12);
   }, 90_000);
 });
