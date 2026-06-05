@@ -107,8 +107,8 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
 | `observability.metricsPort` | `9090` | Prometheus metrics HTTP port |
 | `observability.logPath` | `~/.local/dotlogs/conductor.log` | Log file path |
 | `idleTimeoutMs` | `600000` | Idle timeout (ms) before a session moves to COMPLETE |
-| `prePromptTemplate` | — | Text injected at the top of each session's `CLAUDE.md` (before existing content) |
-| `postPromptTemplate` | — | Text injected at the bottom of each session's `CLAUDE.md` (after existing content) |
+| `prePromptTemplate` | — | Text prepended to every session's initial prompt |
+| `postPromptTemplate` | — | Text appended to every session's initial prompt |
 
 ### Plugin entry fields
 
