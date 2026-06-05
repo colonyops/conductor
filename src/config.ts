@@ -2,6 +2,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { mergeWithDefaults } from "./merge.js";
 import type { LogFormat } from "./sdk/logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -82,18 +83,12 @@ const GITHUB_ISSUES_DEFAULTS: GitHubIssuesBuiltinConfig = {
 
 function buildBuiltins(raw: Partial<ConductorConfig>["builtins"]): ConductorConfig["builtins"] {
   if (!raw?.["github-issues"]) return raw ?? {};
-  const gi = raw["github-issues"] as Partial<GitHubIssuesBuiltinConfig>;
   return {
     ...raw,
-    "github-issues": {
-      tokenSecretKey: gi.tokenSecretKey ?? GITHUB_ISSUES_DEFAULTS.tokenSecretKey,
-      tokenSource: gi.tokenSource ?? GITHUB_ISSUES_DEFAULTS.tokenSource,
-      repo: gi.repo ?? GITHUB_ISSUES_DEFAULTS.repo,
-      labels: gi.labels ?? GITHUB_ISSUES_DEFAULTS.labels,
-      pollIntervalMs: gi.pollIntervalMs ?? GITHUB_ISSUES_DEFAULTS.pollIntervalMs,
-      ...(gi.inProgressLabel !== undefined ? { inProgressLabel: gi.inProgressLabel } : {}),
-      ...(gi.doneLabel !== undefined ? { doneLabel: gi.doneLabel } : {}),
-    },
+    "github-issues": mergeWithDefaults(
+      GITHUB_ISSUES_DEFAULTS,
+      raw["github-issues"] as Partial<GitHubIssuesBuiltinConfig>,
+    ),
   };
 }
 
@@ -307,17 +302,11 @@ export function validateConfig(raw: unknown): {
       ...(p.concurrencyLimit !== undefined ? { concurrencyLimit: p.concurrencyLimit } : {}),
     })),
     trustedPlugins: rawObj.trustedPlugins ?? CONFIG_DEFAULTS.trustedPlugins,
-    concurrency: {
-      global: rawObj.concurrency?.global ?? CONFIG_DEFAULTS.concurrency.global,
-    },
-    observability: {
-      metricsPort: rawObj.observability?.metricsPort ?? CONFIG_DEFAULTS.observability.metricsPort,
-      logPath: rawObj.observability?.logPath ?? CONFIG_DEFAULTS.observability.logPath,
-      logMaxBytes: rawObj.observability?.logMaxBytes ?? CONFIG_DEFAULTS.observability.logMaxBytes,
-      logMaxBackups: rawObj.observability?.logMaxBackups ?? CONFIG_DEFAULTS.observability.logMaxBackups,
-      logFormat: (rawObj.observability?.logFormat as LogFormat | undefined) ?? CONFIG_DEFAULTS.observability.logFormat,
-      logCaller: rawObj.observability?.logCaller ?? CONFIG_DEFAULTS.observability.logCaller,
-    },
+    concurrency: mergeWithDefaults(CONFIG_DEFAULTS.concurrency, rawObj.concurrency),
+    observability: mergeWithDefaults(
+      CONFIG_DEFAULTS.observability,
+      rawObj.observability as Partial<ConductorConfig["observability"]> | undefined,
+    ),
     idleTimeoutMs: rawObj.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs,
     builtins: buildBuiltins(rawObj.builtins),
     ...(rawObj.prePromptTemplate !== undefined ? { prePromptTemplate: rawObj.prePromptTemplate } : {}),
