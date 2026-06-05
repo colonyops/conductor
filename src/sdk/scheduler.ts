@@ -9,11 +9,7 @@ export interface Scheduler {
    * Fire fn immediately (default), then every intervalMs milliseconds.
    * Pass { immediate: false } to skip the first immediate fire.
    */
-  interval(
-    intervalMs: number,
-    fn: () => Promise<void>,
-    opts?: { immediate?: boolean },
-  ): SchedulerHandle;
+  interval(intervalMs: number, fn: () => Promise<void>, opts?: { immediate?: boolean }): SchedulerHandle;
 
   /**
    * Fire fn once per day at each specified time.
@@ -36,15 +32,7 @@ function msUntilNext(hhmm: string): number {
   }
 
   const now = new Date();
-  const next = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    hh,
-    mm,
-    0,
-    0,
-  );
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
 
   if (next <= now) {
     next.setDate(next.getDate() + 1);
@@ -56,11 +44,7 @@ function msUntilNext(hhmm: string): number {
 export function createScheduler(logger: Logger): Scheduler {
   const handles: SchedulerHandle[] = [];
 
-  function interval(
-    intervalMs: number,
-    fn: () => Promise<void>,
-    opts: { immediate?: boolean } = {},
-  ): SchedulerHandle {
+  function interval(intervalMs: number, fn: () => Promise<void>, opts: { immediate?: boolean } = {}): SchedulerHandle {
     const { immediate = true } = opts;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

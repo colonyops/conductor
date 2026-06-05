@@ -1,7 +1,4 @@
-import {
-  createMetrics,
-  startMetricsServer,
-} from "../../src/core/observability.js";
+import { createMetrics, startMetricsServer } from "../../src/core/observability.js";
 
 describe("createMetrics", () => {
   it("returns a registry and all 10 standard metric handles", () => {
@@ -27,12 +24,8 @@ describe("createMetrics", () => {
 
     const text = await registry.metrics();
     // Should have 2 for ACTIVE and 1 for IDLE
-    expect(text).toContain(
-      'conductor_sessions_total{state="ACTIVE",plugin_id="test"} 2',
-    );
-    expect(text).toContain(
-      'conductor_sessions_total{state="IDLE",plugin_id="test"} 1',
-    );
+    expect(text).toContain('conductor_sessions_total{state="ACTIVE",plugin_id="test"} 2');
+    expect(text).toContain('conductor_sessions_total{state="IDLE",plugin_id="test"} 1');
   });
 
   it("gauge set overwrites previous value", async () => {
@@ -85,9 +78,7 @@ describe("createMetrics", () => {
 
     const text = await registry.metrics();
     // Every non-empty line that's not a comment should match the Prometheus line format
-    const lines = text
-      .split("\n")
-      .filter((l) => l.length > 0 && !l.startsWith("#"));
+    const lines = text.split("\n").filter((l) => l.length > 0 && !l.startsWith("#"));
     for (const line of lines) {
       // Lines should be: metric_name{labels} value [timestamp]
       expect(line).toMatch(/^\w+(\{[^}]*\})?\s+[\d.+e-]+/);

@@ -23,20 +23,13 @@ export async function hashPlugin(filePath: string): Promise<string> {
   return `sha256:${hasher.digest("hex")}`;
 }
 
-export function getStoredHash(
-  config: ConductorConfig,
-  pluginId: string,
-): string | undefined {
+export function getStoredHash(config: ConductorConfig, pluginId: string): string | undefined {
   return config.trustedPlugins[pluginId];
 }
 
 export type TrustStatus = "trusted" | "changed" | "unknown";
 
-export function checkTrust(
-  pluginId: string,
-  currentHash: string,
-  config: ConductorConfig,
-): TrustStatus {
+export function checkTrust(pluginId: string, currentHash: string, config: ConductorConfig): TrustStatus {
   const stored = config.trustedPlugins[pluginId];
   if (!stored) return "unknown";
   return stored === currentHash ? "trusted" : "changed";
@@ -92,10 +85,7 @@ export interface PluginRegistration {
   teardown(): void;
 }
 
-export async function validatePluginSecrets(
-  plugin: Plugin,
-  secrets: SecretsClient,
-): Promise<boolean> {
+export async function validatePluginSecrets(plugin: Plugin, secrets: SecretsClient): Promise<boolean> {
   if (!plugin.requiredSecrets?.length) return true;
   for (const key of plugin.requiredSecrets) {
     try {
@@ -107,13 +97,8 @@ export async function validatePluginSecrets(
   return true;
 }
 
-function makeTrackingHiveClient(
-  base: HiveClient,
-  unsubscribes: Array<() => void>,
-): HiveClient {
-  function track<A extends unknown[]>(
-    fn: (...args: A) => () => void,
-  ): (...args: A) => () => void {
+function makeTrackingHiveClient(base: HiveClient, unsubscribes: Array<() => void>): HiveClient {
+  function track<A extends unknown[]>(fn: (...args: A) => () => void): (...args: A) => () => void {
     return (...args) => {
       const unsub = fn(...args);
       unsubscribes.push(unsub);
@@ -147,16 +132,7 @@ export async function loadPlugins(opts: {
   globalLogger: Logger;
   readLineFn?: (question: string) => Promise<string>;
 }): Promise<PluginRegistration[]> {
-  const {
-    config,
-    configPath,
-    sessionManager,
-    eventBus,
-    kvDatabase,
-    secrets,
-    globalLogger,
-    readLineFn,
-  } = opts;
+  const { config, configPath, sessionManager, eventBus, kvDatabase, secrets, globalLogger, readLineFn } = opts;
 
   const registrations: PluginRegistration[] = [];
   const approvals: Array<{ pluginId: string; hash: string }> = [];
@@ -271,13 +247,7 @@ export async function loadPlugins(opts: {
       await Promise.race([
         plugin.init(ctx),
         new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`),
-              ),
-            INIT_TIMEOUT_MS,
-          ),
+          setTimeout(() => reject(new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`)), INIT_TIMEOUT_MS),
         ),
       ]);
     } catch (err) {
@@ -315,9 +285,7 @@ export async function loadPlugins(opts: {
   if (giConfig) {
     process.env.CONDUCTOR_GITHUB_REPO = giConfig.repo;
     process.env.CONDUCTOR_GITHUB_LABELS = giConfig.labels.join(",");
-    process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(
-      giConfig.pollIntervalMs,
-    );
+    process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(giConfig.pollIntervalMs);
     process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY = giConfig.tokenSecretKey;
     process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = giConfig.tokenSource;
     if (giConfig.inProgressLabel) {
@@ -357,13 +325,7 @@ export async function loadPlugins(opts: {
       await Promise.race([
         plugin.init(ctx),
         new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`),
-              ),
-            INIT_TIMEOUT_MS,
-          ),
+          setTimeout(() => reject(new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`)), INIT_TIMEOUT_MS),
         ),
       ]);
     } catch (err) {
@@ -392,9 +354,7 @@ export async function loadPlugins(opts: {
   return registrations;
 }
 
-export async function unloadPlugins(
-  registrations: PluginRegistration[],
-): Promise<void> {
+export async function unloadPlugins(registrations: PluginRegistration[]): Promise<void> {
   for (const reg of registrations) {
     try {
       reg.teardown();

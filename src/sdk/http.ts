@@ -1,10 +1,7 @@
 import type { Logger } from "./logger.js";
 
 export type RequestInterceptor = (init: RequestInit) => RequestInit;
-export type ResponseInterceptor = (
-  response: Response,
-  init?: RequestInit,
-) => void;
+export type ResponseInterceptor = (response: Response, init?: RequestInit) => void;
 
 export interface HttpRequestArgs<T = unknown> {
   url: string;
@@ -23,15 +20,9 @@ export interface HttpResponse<T> {
 
 export interface HttpClient {
   get<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
-  post<TBody, TResponse>(
-    args: HttpRequestArgs<TBody>,
-  ): Promise<HttpResponse<TResponse>>;
-  put<TBody, TResponse>(
-    args: HttpRequestArgs<TBody>,
-  ): Promise<HttpResponse<TResponse>>;
-  patch<TBody, TResponse>(
-    args: HttpRequestArgs<TBody>,
-  ): Promise<HttpResponse<TResponse>>;
+  post<TBody, TResponse>(args: HttpRequestArgs<TBody>): Promise<HttpResponse<TResponse>>;
+  put<TBody, TResponse>(args: HttpRequestArgs<TBody>): Promise<HttpResponse<TResponse>>;
+  patch<TBody, TResponse>(args: HttpRequestArgs<TBody>): Promise<HttpResponse<TResponse>>;
   delete<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
   withRequestInterceptor(fn: RequestInterceptor): HttpClient;
   withResponseInterceptor(fn: ResponseInterceptor): HttpClient;
@@ -42,10 +33,7 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 const BODY_METHODS = new Set<Method>(["POST", "PUT", "PATCH"]);
 
-export function createHttpClient(
-  logger: Logger,
-  baseHeaders: Record<string, string> = {},
-): HttpClient {
+export function createHttpClient(logger: Logger, baseHeaders: Record<string, string> = {}): HttpClient {
   const requestInterceptors: RequestInterceptor[] = [];
   const responseInterceptors: ResponseInterceptor[] = [];
   let getBearer: () => string | null = () => null;
@@ -54,10 +42,7 @@ export function createHttpClient(
     return requestInterceptors.reduce((acc, fn) => fn(acc), init);
   }
 
-  async function doRequest<T>(
-    method: Method,
-    args: HttpRequestArgs,
-  ): Promise<HttpResponse<T>> {
+  async function doRequest<T>(method: Method, args: HttpRequestArgs): Promise<HttpResponse<T>> {
     const headers: Record<string, string> = { ...baseHeaders, ...args.headers };
 
     const token = getBearer();

@@ -183,9 +183,7 @@ describe("persistTrustedPlugins", () => {
 
     await persistTrustedPlugins(approvals, config, configPath);
 
-    const written = JSON.parse(
-      await Bun.file(configPath).text(),
-    ) as ConductorConfig;
+    const written = JSON.parse(await Bun.file(configPath).text()) as ConductorConfig;
     expect(written.trustedPlugins["new-plugin"]).toBe("sha256:new123");
     expect(written.trustedPlugins["existing-plugin"]).toBe("sha256:old");
   });
@@ -193,25 +191,15 @@ describe("persistTrustedPlugins", () => {
   it("does not modify the original config object", async () => {
     const config = makeConfig();
     const configPath = join(dir, "conductor.config.json");
-    await persistTrustedPlugins(
-      [{ pluginId: "p", hash: "sha256:h" }],
-      config,
-      configPath,
-    );
+    await persistTrustedPlugins([{ pluginId: "p", hash: "sha256:h" }], config, configPath);
     expect(config.trustedPlugins.p).toBeUndefined();
   });
 
   it("overwrites an existing hash for the same plugin id", async () => {
     const config = makeConfig({ "my-plugin": "sha256:old" });
     const configPath = join(dir, "conductor.config.json");
-    await persistTrustedPlugins(
-      [{ pluginId: "my-plugin", hash: "sha256:new" }],
-      config,
-      configPath,
-    );
-    const written = JSON.parse(
-      await Bun.file(configPath).text(),
-    ) as ConductorConfig;
+    await persistTrustedPlugins([{ pluginId: "my-plugin", hash: "sha256:new" }], config, configPath);
+    const written = JSON.parse(await Bun.file(configPath).text()) as ConductorConfig;
     expect(written.trustedPlugins["my-plugin"]).toBe("sha256:new");
   });
 });

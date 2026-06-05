@@ -1,10 +1,4 @@
-import {
-  appendFileSync,
-  mkdirSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -42,7 +36,7 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const COLOR_KEY = "\x1b[36m";      // cyan
+const COLOR_KEY = "\x1b[36m"; // cyan
 
 const LOGFMT_ORDERED = ["ts", "level", "component", "msg", "caller"];
 
@@ -88,8 +82,7 @@ function getCaller(): string | undefined {
   if (!stack) return undefined;
   for (const line of stack.split("\n").slice(1)) {
     if (line.includes("sdk/logger")) continue;
-    const m =
-      line.match(/\((.+?):(\d+):\d+\)$/) || line.match(/at (.+?):(\d+):\d+$/);
+    const m = line.match(/\((.+?):(\d+):\d+\)$/) || line.match(/at (.+?):(\d+):\d+$/);
     if (!m) continue;
     const file = (m[1] ?? "").replace(/^file:\/\//, "");
     return `${file}:${m[2]}`;
@@ -160,16 +153,8 @@ function createLogSink(opts: {
   };
 }
 
-function buildLogger(
-  sink: LogSink,
-  baseFields: Record<string, unknown>,
-  withCaller: boolean,
-): Logger {
-  function write(
-    level: LogLevel,
-    msg: string,
-    data?: Record<string, unknown>,
-  ): void {
+function buildLogger(sink: LogSink, baseFields: Record<string, unknown>, withCaller: boolean): Logger {
+  function write(level: LogLevel, msg: string, data?: Record<string, unknown>): void {
     const ts = new Date().toISOString();
     const entry: Record<string, unknown> = {
       ts,
@@ -192,13 +177,9 @@ function buildLogger(
       const component = String(baseFields.component ?? "");
       let dataStr = "";
       if (data && Object.keys(data).length > 0) {
-        dataStr =
-          sink.format === "logfmt"
-            ? ` ${formatLogfmtColored(data)}`
-            : ` ${JSON.stringify(data)}`;
+        dataStr = sink.format === "logfmt" ? ` ${formatLogfmtColored(data)}` : ` ${JSON.stringify(data)}`;
       }
-      const callerStr =
-        withCaller && entry.caller ? ` ${DIM}(${entry.caller})${RESET}` : "";
+      const callerStr = withCaller && entry.caller ? ` ${DIM}(${entry.caller})${RESET}` : "";
       process.stderr.write(
         `${DIM}${ts}${RESET} ${color}[${label}]${RESET} ${BOLD}${component}${RESET}: ${msg}${dataStr}${callerStr}\n`,
       );
@@ -212,8 +193,7 @@ function buildLogger(
     info: (msg, data) => write("info", msg, data),
     warn: (msg, data) => write("warn", msg, data),
     error: (msg, data) => write("error", msg, data),
-    with: (fields) =>
-      buildLogger(sink, { ...baseFields, ...fields }, withCaller),
+    with: (fields) => buildLogger(sink, { ...baseFields, ...fields }, withCaller),
   };
 }
 

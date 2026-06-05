@@ -2,12 +2,7 @@
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
 import { EventBus } from "./core/events.js";
-import {
-  CONDUCTOR_DATA_DIR,
-  isApprovalSignal,
-  watchIpcEvents,
-  writeIpcEvent,
-} from "./core/ipc.js";
+import { CONDUCTOR_DATA_DIR, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
 import { createMetrics, startMetricsServer } from "./core/observability.js";
 import { SessionManager } from "./core/session.js";
 import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
@@ -434,9 +429,7 @@ The idle timeout defaults to \`idleTimeoutMs\` in conductor.config.json (default
 and can be overridden per plugin entry or per \`newSession\` call.
 `;
 
-const program = new Command("conductor")
-  .description("Poll-driven session orchestrator for hive")
-  .version("0.1.0");
+const program = new Command("conductor").description("Poll-driven session orchestrator for hive").version("0.1.0");
 
 program
   .command("start")
@@ -467,10 +460,7 @@ program
       });
 
       const { registry, metrics } = createMetrics();
-      const metricsServer = startMetricsServer(
-        config.observability.metricsPort,
-        registry,
-      );
+      const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
 
       const registrations = await loadPlugins({
         config,
@@ -485,8 +475,7 @@ program
       const watcher = watchIpcEvents(async (ipcEvent) => {
         metrics.ipcEventsTotal.inc({ signal: ipcEvent.signal });
         const isApproval = isApprovalSignal(ipcEvent.signal);
-        const event: SessionEvent =
-          ipcEvent.signal === "activity" ? "PostToolUse" : "Stop";
+        const event: SessionEvent = ipcEvent.signal === "activity" ? "PostToolUse" : "Stop";
         await sessionManager.applyTransition(ipcEvent.sessionId, event, {
           isApprovalPending: isApproval,
         });
@@ -497,15 +486,7 @@ program
         if (shuttingDown) return;
         shuttingDown = true;
         process.exitCode = 0;
-        shutdown(
-          registrations,
-          sessionManager,
-          watcher,
-          metricsServer,
-          kvDatabase,
-          eventBus,
-          logger,
-        )
+        shutdown(registrations, sessionManager, watcher, metricsServer, kvDatabase, eventBus, logger)
           .catch((err) => {
             logger.error("Shutdown error", {
               error: err instanceof Error ? err.message : String(err),
@@ -557,9 +538,7 @@ program
 
 program
   .command("signal <event>")
-  .description(
-    "Write a lifecycle signal for a session (called by Claude Code hooks)",
-  )
+  .description("Write a lifecycle signal for a session (called by Claude Code hooks)")
   .requiredOption("--session <id>", "Session ID")
   .action(async (event: string, opts: { session: string }) => {
     const valid: IpcSignal[] = ["activity", "stop", "stop:approval"];
@@ -571,9 +550,7 @@ program
       await writeIpcEvent(opts.session, event as IpcSignal);
       console.log(`Signal written: ${event} for session ${opts.session}`);
     } catch (e) {
-      console.error(
-        `Failed to write signal: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      console.error(`Failed to write signal: ${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     }
   });
@@ -587,16 +564,12 @@ program
 
 program
   .command("plugin-docs")
-  .description(
-    "Print the plugin SDK reference (LLM-friendly markdown for plugin authoring)",
-  )
+  .description("Print the plugin SDK reference (LLM-friendly markdown for plugin authoring)")
   .action(() => {
     console.log(PLUGIN_DOCS);
   });
 
-const kvCmd = program
-  .command("kv")
-  .description("Inspect and manage plugin KV state");
+const kvCmd = program.command("kv").description("Inspect and manage plugin KV state");
 
 kvCmd
   .command("list")

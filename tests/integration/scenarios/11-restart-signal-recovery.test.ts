@@ -20,12 +20,7 @@ describe("11 — restart signal recovery", () => {
 
   it("processes a pre-written event file when a second event triggers the watcher", async () => {
     const sessionId = "recovery-test-session";
-    const eventsDir = join(
-      env.conductorDataPath,
-      "sessions",
-      sessionId,
-      "events",
-    );
+    const eventsDir = join(env.conductorDataPath, "sessions", sessionId, "events");
     mkdirSync(eventsDir, { recursive: true });
 
     // Write first event BEFORE starting conductor
@@ -34,10 +29,7 @@ describe("11 — restart signal recovery", () => {
       sessionId,
       timestamp: new Date().toISOString(),
     };
-    await Bun.write(
-      join(eventsDir, `${Date.now() - 1000}-activity.json`),
-      JSON.stringify(pre),
-    );
+    await Bun.write(join(eventsDir, `${Date.now() - 1000}-activity.json`), JSON.stringify(pre));
 
     // Start conductor
     daemon = new ConductorDaemon();

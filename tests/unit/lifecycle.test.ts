@@ -21,12 +21,8 @@ describe("transition", () => {
     it("PostToolUse → ACTIVE with startIdleTimer + emitSessionActive", () => {
       const result = transition(makeSession("CREATED"), "PostToolUse", OPTS);
       expect(result.nextState).toBe("ACTIVE");
-      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(true);
     });
 
     it("Stop → throws", () => {
@@ -34,9 +30,7 @@ describe("transition", () => {
     });
 
     it("IdleTimeout → throws", () => {
-      expect(() =>
-        transition(makeSession("CREATED"), "IdleTimeout", OPTS),
-      ).toThrow();
+      expect(() => transition(makeSession("CREATED"), "IdleTimeout", OPTS)).toThrow();
     });
   });
 
@@ -44,15 +38,9 @@ describe("transition", () => {
     it("Stop (no approval) → IDLE with startIdleTimer + emitSessionIdle", () => {
       const result = transition(makeSession("ACTIVE"), "Stop", OPTS);
       expect(result.nextState).toBe("IDLE");
-      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionIdle")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionIdle")).toBe(true);
     });
 
     it("Stop (approval) → APPROVAL with emitSessionApproval", () => {
@@ -61,23 +49,15 @@ describe("transition", () => {
         isApprovalPending: true,
       });
       expect(result.nextState).toBe("APPROVAL");
-      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionApproval")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionApproval")).toBe(true);
     });
 
     it("PostToolUse → ACTIVE (resets idle timer)", () => {
       const result = transition(makeSession("ACTIVE"), "PostToolUse", OPTS);
       expect(result.nextState).toBe("ACTIVE");
-      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(true);
     });
 
     it("IdleTimeout → IDLE", () => {
@@ -90,31 +70,21 @@ describe("transition", () => {
     it("PostToolUse → ACTIVE with emitSessionActive", () => {
       const result = transition(makeSession("IDLE"), "PostToolUse", OPTS);
       expect(result.nextState).toBe("ACTIVE");
-      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "cancelIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(true);
     });
 
     it("IdleTimeout → COMPLETE with triggerCleanup + emitSessionComplete", () => {
       const result = transition(makeSession("IDLE"), "IdleTimeout", OPTS);
       expect(result.nextState).toBe("COMPLETE");
-      expect(result.actions.some((a) => a.type === "triggerCleanup")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionComplete")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "triggerCleanup")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionComplete")).toBe(true);
     });
 
     it("Stop (no approval) → COMPLETE", () => {
       const result = transition(makeSession("IDLE"), "Stop", OPTS);
       expect(result.nextState).toBe("COMPLETE");
-      expect(result.actions.some((a) => a.type === "emitSessionComplete")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "emitSessionComplete")).toBe(true);
     });
 
     it("Stop (approval) → APPROVAL", () => {
@@ -123,9 +93,7 @@ describe("transition", () => {
         isApprovalPending: true,
       });
       expect(result.nextState).toBe("APPROVAL");
-      expect(result.actions.some((a) => a.type === "emitSessionApproval")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "emitSessionApproval")).toBe(true);
     });
   });
 
@@ -133,27 +101,15 @@ describe("transition", () => {
     it("PostToolUse → ACTIVE with startIdleTimer", () => {
       const result = transition(makeSession("APPROVAL"), "PostToolUse", OPTS);
       expect(result.nextState).toBe("ACTIVE");
-      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(true);
     });
 
     it("ApprovalResolved → ACTIVE", () => {
-      const result = transition(
-        makeSession("APPROVAL"),
-        "ApprovalResolved",
-        OPTS,
-      );
+      const result = transition(makeSession("APPROVAL"), "ApprovalResolved", OPTS);
       expect(result.nextState).toBe("ACTIVE");
-      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(
-        true,
-      );
-      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(
-        true,
-      );
+      expect(result.actions.some((a) => a.type === "startIdleTimer")).toBe(true);
+      expect(result.actions.some((a) => a.type === "emitSessionActive")).toBe(true);
     });
 
     it("Stop → throws", () => {
@@ -163,12 +119,7 @@ describe("transition", () => {
 
   describe("COMPLETE", () => {
     it("any event → no-op (stays COMPLETE, no actions)", () => {
-      for (const event of [
-        "PostToolUse",
-        "Stop",
-        "IdleTimeout",
-        "ApprovalResolved",
-      ] as const) {
+      for (const event of ["PostToolUse", "Stop", "IdleTimeout", "ApprovalResolved"] as const) {
         const result = transition(makeSession("COMPLETE"), event, OPTS);
         expect(result.nextState).toBe("COMPLETE");
         expect(result.actions).toHaveLength(0);
@@ -178,9 +129,7 @@ describe("transition", () => {
 
   describe("invalid transitions", () => {
     it("throws on unknown combination", () => {
-      expect(() =>
-        transition(makeSession("CREATED"), "IdleTimeout", OPTS),
-      ).toThrow(/Invalid state transition/);
+      expect(() => transition(makeSession("CREATED"), "IdleTimeout", OPTS)).toThrow(/Invalid state transition/);
     });
   });
 });

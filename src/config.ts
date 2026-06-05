@@ -80,24 +80,18 @@ const GITHUB_ISSUES_DEFAULTS: GitHubIssuesBuiltinConfig = {
   pollIntervalMs: 300_000,
 };
 
-function buildBuiltins(
-  raw: Partial<ConductorConfig>["builtins"],
-): ConductorConfig["builtins"] {
+function buildBuiltins(raw: Partial<ConductorConfig>["builtins"]): ConductorConfig["builtins"] {
   if (!raw?.["github-issues"]) return raw ?? {};
   const gi = raw["github-issues"] as Partial<GitHubIssuesBuiltinConfig>;
   return {
     ...raw,
     "github-issues": {
-      tokenSecretKey:
-        gi.tokenSecretKey ?? GITHUB_ISSUES_DEFAULTS.tokenSecretKey,
+      tokenSecretKey: gi.tokenSecretKey ?? GITHUB_ISSUES_DEFAULTS.tokenSecretKey,
       tokenSource: gi.tokenSource ?? GITHUB_ISSUES_DEFAULTS.tokenSource,
       repo: gi.repo ?? GITHUB_ISSUES_DEFAULTS.repo,
       labels: gi.labels ?? GITHUB_ISSUES_DEFAULTS.labels,
-      pollIntervalMs:
-        gi.pollIntervalMs ?? GITHUB_ISSUES_DEFAULTS.pollIntervalMs,
-      ...(gi.inProgressLabel !== undefined
-        ? { inProgressLabel: gi.inProgressLabel }
-        : {}),
+      pollIntervalMs: gi.pollIntervalMs ?? GITHUB_ISSUES_DEFAULTS.pollIntervalMs,
+      ...(gi.inProgressLabel !== undefined ? { inProgressLabel: gi.inProgressLabel } : {}),
       ...(gi.doneLabel !== undefined ? { doneLabel: gi.doneLabel } : {}),
     },
   };
@@ -114,19 +108,13 @@ function validatePluginEntry(raw: unknown, prefix: string): ConfigError[] {
   if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") {
     errors.push({ field: `${prefix}.enabled`, message: "must be a boolean" });
   }
-  if (
-    raw.idleTimeoutMs !== undefined &&
-    (typeof raw.idleTimeoutMs !== "number" || raw.idleTimeoutMs <= 0)
-  ) {
+  if (raw.idleTimeoutMs !== undefined && (typeof raw.idleTimeoutMs !== "number" || raw.idleTimeoutMs <= 0)) {
     errors.push({
       field: `${prefix}.idleTimeoutMs`,
       message: "must be a positive number",
     });
   }
-  if (
-    raw.concurrencyLimit !== undefined &&
-    (typeof raw.concurrencyLimit !== "number" || raw.concurrencyLimit <= 0)
-  ) {
+  if (raw.concurrencyLimit !== undefined && (typeof raw.concurrencyLimit !== "number" || raw.concurrencyLimit <= 0)) {
     errors.push({
       field: `${prefix}.concurrencyLimit`,
       message: "must be a positive number",
@@ -141,10 +129,7 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
   if (!isObject(raw)) {
     return [{ field: p, message: "must be an object" }];
   }
-  if (
-    raw.tokenSecretKey !== undefined &&
-    typeof raw.tokenSecretKey !== "string"
-  ) {
+  if (raw.tokenSecretKey !== undefined && typeof raw.tokenSecretKey !== "string") {
     errors.push({ field: `${p}.tokenSecretKey`, message: "must be a string" });
   }
   if (typeof raw.repo !== "string" || !raw.repo.includes("/")) {
@@ -169,20 +154,13 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
       }
     }
   }
-  if (
-    raw.pollIntervalMs !== undefined &&
-    (typeof raw.pollIntervalMs !== "number" || raw.pollIntervalMs <= 0)
-  ) {
+  if (raw.pollIntervalMs !== undefined && (typeof raw.pollIntervalMs !== "number" || raw.pollIntervalMs <= 0)) {
     errors.push({
       field: `${p}.pollIntervalMs`,
       message: "must be a positive number",
     });
   }
-  if (
-    raw.tokenSource !== undefined &&
-    raw.tokenSource !== "secret" &&
-    raw.tokenSource !== "gh-cli"
-  ) {
+  if (raw.tokenSource !== undefined && raw.tokenSource !== "secret" && raw.tokenSource !== "gh-cli") {
     errors.push({
       field: `${p}.tokenSource`,
       message: 'must be "secret" or "gh-cli"',
@@ -235,8 +213,7 @@ export function validateConfig(raw: unknown): {
     } else {
       if (
         raw.concurrency.global !== undefined &&
-        (typeof raw.concurrency.global !== "number" ||
-          raw.concurrency.global <= 0)
+        (typeof raw.concurrency.global !== "number" || raw.concurrency.global <= 0)
       ) {
         errors.push({
           field: "concurrency.global",
@@ -253,9 +230,7 @@ export function validateConfig(raw: unknown): {
       const obs = raw.observability;
       if (
         obs.metricsPort !== undefined &&
-        (typeof obs.metricsPort !== "number" ||
-          obs.metricsPort <= 0 ||
-          obs.metricsPort > 65535)
+        (typeof obs.metricsPort !== "number" || obs.metricsPort <= 0 || obs.metricsPort > 65535)
       ) {
         errors.push({
           field: "observability.metricsPort",
@@ -268,29 +243,19 @@ export function validateConfig(raw: unknown): {
           message: "must be a string",
         });
       }
-      if (
-        obs.logMaxBytes !== undefined &&
-        (typeof obs.logMaxBytes !== "number" || obs.logMaxBytes <= 0)
-      ) {
+      if (obs.logMaxBytes !== undefined && (typeof obs.logMaxBytes !== "number" || obs.logMaxBytes <= 0)) {
         errors.push({
           field: "observability.logMaxBytes",
           message: "must be a positive number",
         });
       }
-      if (
-        obs.logMaxBackups !== undefined &&
-        (typeof obs.logMaxBackups !== "number" || obs.logMaxBackups < 0)
-      ) {
+      if (obs.logMaxBackups !== undefined && (typeof obs.logMaxBackups !== "number" || obs.logMaxBackups < 0)) {
         errors.push({
           field: "observability.logMaxBackups",
           message: "must be a non-negative number",
         });
       }
-      if (
-        obs.logFormat !== undefined &&
-        obs.logFormat !== "json" &&
-        obs.logFormat !== "logfmt"
-      ) {
+      if (obs.logFormat !== undefined && obs.logFormat !== "json" && obs.logFormat !== "logfmt") {
         errors.push({
           field: "observability.logFormat",
           message: 'must be "json" or "logfmt"',
@@ -305,27 +270,18 @@ export function validateConfig(raw: unknown): {
     }
   }
 
-  if (
-    raw.idleTimeoutMs !== undefined &&
-    (typeof raw.idleTimeoutMs !== "number" || raw.idleTimeoutMs <= 0)
-  ) {
+  if (raw.idleTimeoutMs !== undefined && (typeof raw.idleTimeoutMs !== "number" || raw.idleTimeoutMs <= 0)) {
     errors.push({
       field: "idleTimeoutMs",
       message: "must be a positive number",
     });
   }
 
-  if (
-    raw.prePromptTemplate !== undefined &&
-    typeof raw.prePromptTemplate !== "string"
-  ) {
+  if (raw.prePromptTemplate !== undefined && typeof raw.prePromptTemplate !== "string") {
     errors.push({ field: "prePromptTemplate", message: "must be a string" });
   }
 
-  if (
-    raw.postPromptTemplate !== undefined &&
-    typeof raw.postPromptTemplate !== "string"
-  ) {
+  if (raw.postPromptTemplate !== undefined && typeof raw.postPromptTemplate !== "string") {
     errors.push({ field: "postPromptTemplate", message: "must be a string" });
   }
 
@@ -333,9 +289,7 @@ export function validateConfig(raw: unknown): {
     if (!isObject(raw.builtins)) {
       errors.push({ field: "builtins", message: "must be an object" });
     } else if (raw.builtins["github-issues"] !== undefined) {
-      errors.push(
-        ...validateGitHubIssuesBuiltin(raw.builtins["github-issues"]),
-      );
+      errors.push(...validateGitHubIssuesBuiltin(raw.builtins["github-issues"]));
     }
   }
 
@@ -349,44 +303,25 @@ export function validateConfig(raw: unknown): {
     plugins: (rawObj.plugins ?? CONFIG_DEFAULTS.plugins).map((p) => ({
       path: p.path,
       enabled: p.enabled ?? true,
-      ...(p.idleTimeoutMs !== undefined
-        ? { idleTimeoutMs: p.idleTimeoutMs }
-        : {}),
-      ...(p.concurrencyLimit !== undefined
-        ? { concurrencyLimit: p.concurrencyLimit }
-        : {}),
+      ...(p.idleTimeoutMs !== undefined ? { idleTimeoutMs: p.idleTimeoutMs } : {}),
+      ...(p.concurrencyLimit !== undefined ? { concurrencyLimit: p.concurrencyLimit } : {}),
     })),
     trustedPlugins: rawObj.trustedPlugins ?? CONFIG_DEFAULTS.trustedPlugins,
     concurrency: {
       global: rawObj.concurrency?.global ?? CONFIG_DEFAULTS.concurrency.global,
     },
     observability: {
-      metricsPort:
-        rawObj.observability?.metricsPort ??
-        CONFIG_DEFAULTS.observability.metricsPort,
-      logPath:
-        rawObj.observability?.logPath ?? CONFIG_DEFAULTS.observability.logPath,
-      logMaxBytes:
-        rawObj.observability?.logMaxBytes ??
-        CONFIG_DEFAULTS.observability.logMaxBytes,
-      logMaxBackups:
-        rawObj.observability?.logMaxBackups ??
-        CONFIG_DEFAULTS.observability.logMaxBackups,
-      logFormat:
-        (rawObj.observability?.logFormat as LogFormat | undefined) ??
-        CONFIG_DEFAULTS.observability.logFormat,
-      logCaller:
-        rawObj.observability?.logCaller ??
-        CONFIG_DEFAULTS.observability.logCaller,
+      metricsPort: rawObj.observability?.metricsPort ?? CONFIG_DEFAULTS.observability.metricsPort,
+      logPath: rawObj.observability?.logPath ?? CONFIG_DEFAULTS.observability.logPath,
+      logMaxBytes: rawObj.observability?.logMaxBytes ?? CONFIG_DEFAULTS.observability.logMaxBytes,
+      logMaxBackups: rawObj.observability?.logMaxBackups ?? CONFIG_DEFAULTS.observability.logMaxBackups,
+      logFormat: (rawObj.observability?.logFormat as LogFormat | undefined) ?? CONFIG_DEFAULTS.observability.logFormat,
+      logCaller: rawObj.observability?.logCaller ?? CONFIG_DEFAULTS.observability.logCaller,
     },
     idleTimeoutMs: rawObj.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs,
     builtins: buildBuiltins(rawObj.builtins),
-    ...(rawObj.prePromptTemplate !== undefined
-      ? { prePromptTemplate: rawObj.prePromptTemplate }
-      : {}),
-    ...(rawObj.postPromptTemplate !== undefined
-      ? { postPromptTemplate: rawObj.postPromptTemplate }
-      : {}),
+    ...(rawObj.prePromptTemplate !== undefined ? { prePromptTemplate: rawObj.prePromptTemplate } : {}),
+    ...(rawObj.postPromptTemplate !== undefined ? { postPromptTemplate: rawObj.postPromptTemplate } : {}),
   };
 
   return { config, errors: [] };
@@ -394,10 +329,7 @@ export function validateConfig(raw: unknown): {
 
 // ── I/O ───────────────────────────────────────────────────────────────────────
 
-const SEARCH_PATHS = [
-  ".conductor/conductor.config.json",
-  "conductor.config.json",
-];
+const SEARCH_PATHS = [".conductor/conductor.config.json", "conductor.config.json"];
 
 export function loadConfig(configPath?: string): ConductorConfig {
   let filePath: string;
@@ -422,16 +354,10 @@ export function loadConfig(configPath?: string): ConductorConfig {
   try {
     raw = JSON.parse(readFileSync(filePath, "utf-8"));
   } catch (e) {
-    if (
-      e instanceof Error &&
-      "code" in e &&
-      (e as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
+    if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT") {
       return { ...CONFIG_DEFAULTS };
     }
-    throw new Error(
-      `Failed to parse config at ${filePath}: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    throw new Error(`Failed to parse config at ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const { config, errors } = validateConfig(raw);
@@ -442,10 +368,7 @@ export function loadConfig(configPath?: string): ConductorConfig {
   return config;
 }
 
-export async function writeConfig(
-  config: ConductorConfig,
-  configPath: string,
-): Promise<void> {
+export async function writeConfig(config: ConductorConfig, configPath: string): Promise<void> {
   const absPath = resolve(configPath);
   const dir = dirname(absPath);
   mkdirSync(dir, { recursive: true });

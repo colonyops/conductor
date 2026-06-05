@@ -1,10 +1,4 @@
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConductorConfig } from "../../../src/config.js";
@@ -110,12 +104,7 @@ export class TestEnv {
 
   async setup(): Promise<void> {
     // Create directory structure
-    for (const dir of [
-      this.hivePath,
-      this.conductorDataPath,
-      join(this.root, "logs"),
-      join(this.root, "git-remote"),
-    ]) {
+    for (const dir of [this.hivePath, this.conductorDataPath, join(this.root, "logs"), join(this.root, "git-remote")]) {
       mkdirSync(dir, { recursive: true });
     }
 
@@ -217,9 +206,7 @@ export class TestEnv {
       if (predicate(sessions)) return sessions;
       await new Promise((r) => setTimeout(r, 200));
     }
-    throw new Error(
-      `Timed out after ${timeoutMs}ms waiting for hive sessions to match predicate`,
-    );
+    throw new Error(`Timed out after ${timeoutMs}ms waiting for hive sessions to match predicate`);
   }
 
   /**
@@ -238,8 +225,7 @@ export class TestEnv {
       const entries = readdirSync(reposDir);
       const prefix = `${session.repo}-`;
       const candidates = entries.filter((e) => e.startsWith(prefix));
-      if (candidates.length === 1 && candidates[0])
-        return join(reposDir, candidates[0]);
+      if (candidates.length === 1 && candidates[0]) return join(reposDir, candidates[0]);
     } catch {
       // repos dir doesn't exist yet
     }

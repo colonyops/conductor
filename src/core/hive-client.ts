@@ -59,9 +59,7 @@ export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     const err = await new Response(proc.stderr).text();
-    throw new Error(
-      `hive session list failed (exit ${exitCode}): ${err.trim()}`,
-    );
+    throw new Error(`hive session list failed (exit ${exitCode}): ${err.trim()}`);
   }
   const output = await new Response(proc.stdout).text();
   return output
@@ -74,9 +72,7 @@ export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
 // Serialize hiveNew calls to avoid races against the hive DB.
 let hiveNewQueue: Promise<void> = Promise.resolve();
 
-export async function hiveNew(
-  args: HiveNewSessionArgs,
-): Promise<{ id: string; workDir: string; existed: boolean }> {
+export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; workDir: string; existed: boolean }> {
   const prev = hiveNewQueue;
   let release!: () => void;
   hiveNewQueue = new Promise<void>((resolve) => {
@@ -119,16 +115,12 @@ export async function hiveNew(
 
     if (result?.status !== "created") {
       if (result?.error?.includes("already exists")) {
-        const existing = (await hiveSessionList()).find(
-          (s) => s.name === args.name,
-        );
+        const existing = (await hiveSessionList()).find((s) => s.name === args.name);
         if (existing) {
           return { id: existing.id, workDir: "", existed: true };
         }
       }
-      throw new Error(
-        `hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`,
-      );
+      throw new Error(`hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`);
     }
 
     await acceptTrustPrompt(result.name, result.path);
@@ -145,16 +137,8 @@ function encodeProjectPath(absPath: string): string {
   return absPath.replace(/\//g, "-").replace(/\./g, "");
 }
 
-async function acceptTrustPrompt(
-  sessionName: string,
-  workDir: string,
-): Promise<void> {
-  const projectDir = join(
-    homedir(),
-    ".claude",
-    "projects",
-    encodeProjectPath(workDir),
-  );
+async function acceptTrustPrompt(sessionName: string, workDir: string): Promise<void> {
+  const projectDir = join(homedir(), ".claude", "projects", encodeProjectPath(workDir));
   if (existsSync(projectDir)) {
     // Directory already trusted from a prior session — no prompt will appear.
     return;
@@ -162,10 +146,10 @@ async function acceptTrustPrompt(
 
   // New directory: wait for Claude Code to render the trust prompt, then accept.
   await new Promise((resolve) => setTimeout(resolve, 3000));
-  const proc = Bun.spawn(
-    ["tmux", "send-keys", "-t", `${sessionName}:claude`, "", "Enter"],
-    { stdout: "pipe", stderr: "pipe" },
-  );
+  const proc = Bun.spawn(["tmux", "send-keys", "-t", `${sessionName}:claude`, "", "Enter"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   await proc.exited;
 }
 

@@ -7,9 +7,7 @@ export interface ConcurrencyLimiter {
   readonly waiting: number;
 }
 
-export function createConcurrencyLimiter(
-  maxConcurrent: number,
-): ConcurrencyLimiter {
+export function createConcurrencyLimiter(maxConcurrent: number): ConcurrencyLimiter {
   let activeCount = 0;
   const queue: Array<() => void> = [];
 

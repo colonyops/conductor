@@ -18,11 +18,7 @@ interface GitHubIssue {
 
 // ── GitHub REST helpers ───────────────────────────────────────────────────────
 
-async function fetchIssues(
-  token: string,
-  repo: string,
-  labels: string[],
-): Promise<GitHubIssue[]> {
+async function fetchIssues(token: string, repo: string, labels: string[]): Promise<GitHubIssue[]> {
   const labelParam = encodeURIComponent(labels.join(","));
   const url = `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
   const res = await fetch(url, {
@@ -36,9 +32,7 @@ async function fetchIssues(
   if (res.status === 401 || res.status === 403) {
     const rateLimitRemaining = res.headers.get("X-RateLimit-Remaining");
     if (rateLimitRemaining === "0") {
-      throw new Error(
-        `GitHub rate limit exceeded (status ${res.status}). Backing off.`,
-      );
+      throw new Error(`GitHub rate limit exceeded (status ${res.status}). Backing off.`);
     }
     throw new Error(`GitHub API authentication error (status ${res.status}).`);
   }
@@ -50,54 +44,35 @@ async function fetchIssues(
   return res.json() as Promise<GitHubIssue[]>;
 }
 
-async function closeIssue(
-  token: string,
-  repo: string,
-  issueNumber: number,
-): Promise<void> {
-  const res = await fetch(
-    `https://api.github.com/repos/${repo}/issues/${issueNumber}`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ state: "closed" }),
+async function closeIssue(token: string, repo: string, issueNumber: number): Promise<void> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({ state: "closed" }),
+  });
   if (!res.ok) {
-    throw new Error(
-      `Failed to close issue #${issueNumber}: HTTP ${res.status}`,
-    );
+    throw new Error(`Failed to close issue #${issueNumber}: HTTP ${res.status}`);
   }
 }
 
-async function addLabel(
-  token: string,
-  repo: string,
-  issueNumber: number,
-  label: string,
-): Promise<void> {
-  const res = await fetch(
-    `https://api.github.com/repos/${repo}/issues/${issueNumber}/labels`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ labels: [label] }),
+async function addLabel(token: string, repo: string, issueNumber: number, label: string): Promise<void> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/labels`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({ labels: [label] }),
+  });
   if (!res.ok) {
-    throw new Error(
-      `Failed to add label "${label}" to issue #${issueNumber}: HTTP ${res.status}`,
-    );
+    throw new Error(`Failed to add label "${label}" to issue #${issueNumber}: HTTP ${res.status}`);
   }
 }
 
@@ -141,19 +116,14 @@ export default definePlugin({
 
     const repo = process.env.CONDUCTOR_GITHUB_REPO;
     const labelsStr = process.env.CONDUCTOR_GITHUB_LABELS;
-    const pollIntervalMs = Number(
-      process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS ?? "300000",
-    );
-    const tokenSecretKey =
-      process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
+    const pollIntervalMs = Number(process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS ?? "300000");
+    const tokenSecretKey = process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
     const tokenSource = process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE ?? "secret";
     const inProgressLabel = process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL;
     const doneLabel = process.env.CONDUCTOR_GITHUB_DONE_LABEL;
 
     if (!repo || !labelsStr) {
-      logger.warn(
-        "GitHub Issues plugin: missing CONDUCTOR_GITHUB_REPO or CONDUCTOR_GITHUB_LABELS, skipping",
-      );
+      logger.warn("GitHub Issues plugin: missing CONDUCTOR_GITHUB_REPO or CONDUCTOR_GITHUB_LABELS, skipping");
       return;
     }
 
@@ -235,12 +205,7 @@ export default definePlugin({
 
         if (inProgressLabel) {
           try {
-            await addLabel(
-              token,
-              repo as string,
-              issue.number,
-              inProgressLabel,
-            );
+            await addLabel(token, repo as string, issue.number, inProgressLabel);
           } catch (err) {
             logger.warn("GitHub Issues: failed to add in-progress label", {
               issueNumber: issue.number,

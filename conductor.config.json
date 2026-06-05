@@ -1,7 +1,5 @@
 {
-  "plugins": [
-    { "path": "~/.conductor/plugins/github-autofix.ts", "enabled": true }
-  ],
+  "plugins": [{ "path": "~/.conductor/plugins/github-autofix.ts", "enabled": true }],
   "trustedPlugins": {},
   "concurrency": { "global": 10 },
   "observability": {

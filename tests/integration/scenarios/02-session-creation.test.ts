@@ -2,10 +2,7 @@ import { join } from "node:path";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const SESSION_CREATOR = join(
-  import.meta.dir,
-  "../fixtures/plugins/session-creator.plugin.ts",
-);
+const SESSION_CREATOR = join(import.meta.dir, "../fixtures/plugins/session-creator.plugin.ts");
 
 describe("02 — session creation", () => {
   let env: TestEnv;

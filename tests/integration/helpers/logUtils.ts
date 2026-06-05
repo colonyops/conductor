@@ -40,10 +40,7 @@ export function byMsg(msg: string): (e: LogEntry) => boolean {
   return (e) => e.msg === msg;
 }
 
-export function byMsgData(
-  msg: string,
-  data: Record<string, unknown>,
-): (e: LogEntry) => boolean {
+export function byMsgData(msg: string, data: Record<string, unknown>): (e: LogEntry) => boolean {
   return (e) => {
     if (e.msg !== msg) return false;
     return Object.entries(data).every(([k, v]) => e.data?.[k] === v);
