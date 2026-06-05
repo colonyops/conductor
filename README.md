@@ -83,7 +83,8 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
     "logMaxBackups": 5
   },
   "idleTimeoutMs": 600000,
-  "prePromptTemplate": "You are an autonomous agent...",
+  "prePromptTemplate": "You are running as a headless agent without human interaction.",
+  "postPromptTemplate": "When your task is complete, open a draft PR and link it to the relevant issue.",
   "builtins": {
     "github-issues": {
       "repo": "owner/repo",
@@ -106,7 +107,8 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
 | `observability.metricsPort` | `9090` | Prometheus metrics HTTP port |
 | `observability.logPath` | `~/.local/dotlogs/conductor.log` | Log file path |
 | `idleTimeoutMs` | `600000` | Idle timeout (ms) before a session moves to COMPLETE |
-| `prePromptTemplate` | — | Text injected at the top of each session's `CLAUDE.md` |
+| `prePromptTemplate` | — | Text prepended to every session's initial prompt |
+| `postPromptTemplate` | — | Text appended to every session's initial prompt |
 
 ### Plugin entry fields
 

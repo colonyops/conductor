@@ -121,12 +121,13 @@ function; call it to remove the listener.
 
 \`\`\`ts
 interface NewSessionOptions {
-  name:              string;
-  remote:            string;          // git remote URL
-  context?:          string;          // extra text appended to the pre-prompt
-  agent?:            string;
-  idleTimeoutMs?:    number;          // overrides config for this session only
-  prePromptOverride?: string;         // replaces the global prePromptTemplate
+  name:               string;
+  remote:             string;          // git remote URL
+  context?:           string;          // initial task prompt for the session
+  agent?:             string;
+  idleTimeoutMs?:     number;          // overrides config for this session only
+  prePromptOverride?: string;          // replaces the global prePromptTemplate for this session
+  postPromptOverride?: string;         // replaces the global postPromptTemplate for this session
 }
 
 interface HiveClient {

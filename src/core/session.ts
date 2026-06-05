@@ -8,10 +8,7 @@ import { hiveNew, hiveRecycle } from "./hive-client.js";
 import { CONDUCTOR_DATA_DIR, sessionEventsDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
 
-// ── Hook / pre-prompt injection helpers ──────────────────────────────────────
-
-const CONDUCTOR_MARKER_START = "<!-- conductor:start -->";
-const CONDUCTOR_MARKER_END = "<!-- conductor:end -->";
+// ── Hook injection helpers ────────────────────────────────────────────────────
 
 export async function injectHooks(
   workDir: string,
@@ -55,31 +52,17 @@ export async function injectHooks(
   await Bun.write(settingsPath, `${JSON.stringify(existing, null, 2)}\n`);
 }
 
-export async function injectPrePrompt(
-  workDir: string,
-  template: string,
-): Promise<void> {
-  const claudeMdPath = `${workDir}/CLAUDE.md`;
-  let content = "";
-  try {
-    content = await Bun.file(claudeMdPath).text();
-  } catch {
-    // file doesn't exist — will be created
-  }
-
-  const block = `${CONDUCTOR_MARKER_START}\n${template}\n${CONDUCTOR_MARKER_END}`;
-
-  if (content.includes(CONDUCTOR_MARKER_START)) {
-    const re = new RegExp(
-      `${CONDUCTOR_MARKER_START}[\\s\\S]*?${CONDUCTOR_MARKER_END}`,
-      "g",
-    );
-    content = content.replace(re, block);
-  } else {
-    content = block + (content ? `\n\n${content}` : "");
-  }
-
-  await Bun.write(claudeMdPath, content);
+export function buildPromptWithTemplates(
+  context: string | undefined,
+  preTemplate: string | undefined,
+  postTemplate: string | undefined,
+): string | undefined {
+  if (!preTemplate && !postTemplate) return context;
+  const parts: string[] = [];
+  if (preTemplate) parts.push(preTemplate);
+  if (context) parts.push(context);
+  if (postTemplate) parts.push(postTemplate);
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 export function buildSession(
@@ -112,6 +95,7 @@ export interface CreateSessionOptions {
   agent?: string;
   idleTimeoutMs?: number;
   prePromptOverride?: string;
+  postPromptOverride?: string;
 }
 
 export interface SessionManagerDeps {
@@ -139,10 +123,20 @@ export class SessionManager {
   async createSession(opts: CreateSessionOptions): Promise<Session> {
     const release = await this.globalLimiter.acquire();
     try {
+      const preTemplate =
+        opts.prePromptOverride ?? this.config.prePromptTemplate;
+      const postTemplate =
+        opts.postPromptOverride ?? this.config.postPromptTemplate;
+      const prompt = buildPromptWithTemplates(
+        opts.context,
+        preTemplate,
+        postTemplate,
+      );
+
       const { id, workDir } = await hiveNew({
         name: opts.name,
         remote: opts.remote,
-        ...(opts.context !== undefined ? { prompt: opts.context } : {}),
+        ...(prompt !== undefined ? { prompt } : {}),
         ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
       });
 
@@ -150,11 +144,6 @@ export class SessionManager {
       mkdirSync(sessionEventsDir(id), { recursive: true });
 
       await injectHooks(workDir, id);
-
-      const template = opts.prePromptOverride ?? this.config.prePromptTemplate;
-      if (template) {
-        await injectPrePrompt(workDir, template);
-      }
 
       const session = buildSession(
         id,
