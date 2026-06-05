@@ -75,13 +75,19 @@ async function addLabel(token: string, repo: string, issueNumber: number, label:
 }
 
 // ── KV schema ─────────────────────────────────────────────────────────────────
-//   "seen:<issueId>"      → { sessionId: string; issueNumber: number; createdAt: string }
+//   "seen:<issueId>"      → { sessionId: string; issueNumber: number; createdAt: string; completedAt?: string }
 //   "session:<sessionId>" → { issueId: number; issueNumber: number; repo: string }
+//
+// The "seen:" marker is permanent for the lifetime of an open issue. It is set
+// when a session is first spawned and is NOT removed when that session
+// completes — otherwise a still-open issue (PR review pending) would be picked
+// up again on the next poll, spawning an endless stream of duplicate sessions.
 
 interface SeenEntry {
   sessionId: string;
   issueNumber: number;
   createdAt: string;
+  completedAt?: string;
 }
 
 interface SessionEntry {
@@ -255,7 +261,16 @@ export default definePlugin({
         }
       }
 
-      await kv.delete(`seen:${entry.issueId}`);
+      // Keep the "seen:" marker so the still-open issue is not re-spawned on the
+      // next poll. Stamp it as completed for observability. Drop the
+      // session-scoped entry since that session no longer exists.
+      const seen = await kv.get<SeenEntry>(`seen:${entry.issueId}`);
+      if (seen) {
+        await kv.set<SeenEntry>(`seen:${entry.issueId}`, {
+          ...seen,
+          completedAt: new Date().toISOString(),
+        });
+      }
       await kv.delete(`session:${session.id}`);
     });
   },
