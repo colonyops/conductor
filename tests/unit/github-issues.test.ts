@@ -1,5 +1,14 @@
-import githubIssuesPlugin, { issueSlug, parseNextLink } from "../../src/plugins/github-issues.js";
+import type { GitHubIssuesBuiltinConfig } from "../../src/config.js";
+import { createGitHubIssuesPlugin, issueSlug, parseNextLink } from "../../src/plugins/github-issues.js";
 import type { PluginContext, Session } from "../../src/types.js";
+
+const baseConfig: GitHubIssuesBuiltinConfig = {
+  tokenSecretKey: "github.token",
+  tokenSource: "secret",
+  repo: "acme/widgets",
+  labels: ["agent"],
+  pollIntervalMs: 300_000,
+};
 
 describe("issueSlug", () => {
   it("produces gh-{number}-{slug} format", () => {
@@ -175,27 +184,10 @@ function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][], opts: { failNew
 }
 
 describe("github-issues lifecycle", () => {
-  const ENV_KEYS = ["CONDUCTOR_GITHUB_REPO", "CONDUCTOR_GITHUB_LABELS", "CONDUCTOR_GITHUB_TOKEN_SOURCE"];
-  const saved: Record<string, string | undefined> = {};
-
-  beforeEach(() => {
-    for (const k of ENV_KEYS) saved[k] = process.env[k];
-    process.env.CONDUCTOR_GITHUB_REPO = "acme/widgets";
-    process.env.CONDUCTOR_GITHUB_LABELS = "agent";
-    process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = "secret";
-  });
-
-  afterEach(() => {
-    for (const k of ENV_KEYS) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k] as string;
-    }
-  });
-
   it("spawns one session per new issue", async () => {
     const h = makeContext([{ id: 100, number: 7, title: "fix the thing" }]);
     try {
-      await githubIssuesPlugin.init(h.ctx);
+      await createGitHubIssuesPlugin(baseConfig).init(h.ctx);
       await h.runPoll();
       expect(h.created).toHaveLength(1);
       expect(h.store.has("seen:100")).toBe(true);
@@ -209,7 +201,7 @@ describe("github-issues lifecycle", () => {
     const page2: FakeIssue[] = [{ id: 200, number: 8, title: "second page" }];
     const h = makeContext([page1, page2]);
     try {
-      await githubIssuesPlugin.init(h.ctx);
+      await createGitHubIssuesPlugin(baseConfig).init(h.ctx);
       await h.runPoll();
       expect(h.fetchCalls()).toBe(2);
       expect(h.created).toHaveLength(2);
@@ -223,7 +215,7 @@ describe("github-issues lifecycle", () => {
   it("records the sessionId on the seen marker after spawning", async () => {
     const h = makeContext([{ id: 100, number: 7, title: "fix the thing" }]);
     try {
-      await githubIssuesPlugin.init(h.ctx);
+      await createGitHubIssuesPlugin(baseConfig).init(h.ctx);
       await h.runPoll();
       const seen = h.store.get("seen:100") as { sessionId?: string };
       expect(seen.sessionId).toBe("sess-1");
@@ -236,7 +228,7 @@ describe("github-issues lifecycle", () => {
     const issue = { id: 100, number: 7, title: "fix the thing" };
     const failing = makeContext([issue], { failNewSession: true });
     try {
-      await githubIssuesPlugin.init(failing.ctx);
+      await createGitHubIssuesPlugin(baseConfig).init(failing.ctx);
       await failing.runPoll();
 
       // No session created and the phantom marker is cleaned up so the issue is
@@ -252,7 +244,7 @@ describe("github-issues lifecycle", () => {
     const issue = { id: 100, number: 7, title: "fix the thing" };
     const h = makeContext([issue]);
     try {
-      await githubIssuesPlugin.init(h.ctx);
+      await createGitHubIssuesPlugin(baseConfig).init(h.ctx);
 
       // First poll spawns a session.
       await h.runPoll();

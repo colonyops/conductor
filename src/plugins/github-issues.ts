@@ -1,4 +1,6 @@
+import type { GitHubIssuesBuiltinConfig } from "../config.js";
 import { definePlugin } from "../sdk/index.js";
+import type { Plugin } from "../types.js";
 
 // ── GitHub API types ──────────────────────────────────────────────────────────
 
@@ -130,188 +132,170 @@ interface SessionEntry {
 
 const PLUGIN_ID = "conductor.builtin.github-issues";
 
-export default definePlugin({
-  id: PLUGIN_ID,
-  name: "GitHub Issues",
-  requiredSecrets: [],
+// Builds the builtin GitHub Issues plugin from validated config. Config is
+// passed explicitly by the loader rather than read from process.env, so values
+// stay scoped to this instance and never leak into the process environment.
+export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plugin {
+  return definePlugin({
+    id: PLUGIN_ID,
+    name: "GitHub Issues",
+    requiredSecrets: [],
 
-  async init({ kv, hive, secrets, scheduler, logger }) {
-    // Config is provided via conductor.config.json builtins["github-issues"].
-    // We access it through the hive client's session manager config indirectly,
-    // but since PluginContext doesn't expose raw config, we read it from
-    // process.env or rely on the plugin being skipped if config is absent.
-    //
-    // For v1, the plugin reads its config from env or conductor.config.json
-    // via the secrets client for the token, and relies on the conductor
-    // startup to validate and pass config as env vars.
-    //
-    // Actual config fields are read from env vars set by conductor startup
-    // (set in conductor start action) or from the conductor.config.json
-    // builtins section. Since PluginContext doesn't expose raw config,
-    // the builtin plugin reads from process.env for its configuration.
+    async init({ kv, hive, secrets, scheduler, logger }) {
+      const {
+        repo,
+        labels,
+        pollIntervalMs,
+        tokenSecretKey,
+        tokenSource,
+        assignee,
+        inProgressLabel,
+        doneLabel,
+        maxOpenSessions,
+      } = config;
 
-    const repo = process.env.CONDUCTOR_GITHUB_REPO;
-    const labelsStr = process.env.CONDUCTOR_GITHUB_LABELS;
-    const pollIntervalMs = Number(process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS ?? "300000");
-    const tokenSecretKey = process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
-    const tokenSource = process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE ?? "secret";
-    const assignee = process.env.CONDUCTOR_GITHUB_ASSIGNEE || undefined;
-    const inProgressLabel = process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL;
-    const doneLabel = process.env.CONDUCTOR_GITHUB_DONE_LABEL;
-    const maxOpenSessions = process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS
-      ? Number(process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS)
-      : undefined;
+      if (!repo || labels.length === 0) {
+        logger.warn("GitHub Issues plugin: missing repo or labels, skipping");
+        return;
+      }
 
-    if (!repo || !labelsStr) {
-      logger.warn("GitHub Issues plugin: missing CONDUCTOR_GITHUB_REPO or CONDUCTOR_GITHUB_LABELS, skipping");
-      return;
-    }
-
-    const labels = labelsStr
-      .split(",")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (labels.length === 0) {
-      logger.warn("GitHub Issues plugin: no labels configured, skipping");
-      return;
-    }
-
-    let token: string;
-    try {
-      token = await secrets.get(tokenSecretKey, {
-        env: "GITHUB_TOKEN",
-        ghCLI: tokenSource === "gh-cli",
-      });
-    } catch (err) {
-      logger.error("GitHub Issues plugin: failed to resolve token", {
-        secretKey: tokenSecretKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-
-    logger.info("GitHub Issues plugin initialized", {
-      repo,
-      labels,
-      assignee,
-      pollIntervalMs,
-    });
-
-    async function poll(): Promise<void> {
-      let issues: GitHubIssue[];
+      let token: string;
       try {
-        issues = await fetchIssues(token, repo as string, labels, assignee);
+        token = await secrets.get(tokenSecretKey, {
+          env: "GITHUB_TOKEN",
+          ghCLI: tokenSource === "gh-cli",
+        });
       } catch (err) {
-        logger.error("GitHub Issues: poll failed", {
+        logger.error("GitHub Issues plugin: failed to resolve token", {
+          secretKey: tokenSecretKey,
           error: err instanceof Error ? err.message : String(err),
         });
         return;
       }
 
-      for (const issue of issues) {
-        const seenKey = `seen:${issue.id}`;
-        if (await kv.has(seenKey)) continue;
+      logger.info("GitHub Issues plugin initialized", {
+        repo,
+        labels,
+        assignee,
+        pollIntervalMs,
+      });
 
-        if (maxOpenSessions !== undefined) {
-          const openCount = hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length;
-          if (openCount >= maxOpenSessions) {
-            logger.info("GitHub Issues: max open sessions reached, deferring issue", {
-              issueNumber: issue.number,
-              openCount,
-              maxOpenSessions,
-            });
-            break;
-          }
-        }
-
-        logger.info("GitHub Issues: new issue found, creating session", {
-          issueNumber: issue.number,
-          title: issue.title,
-        });
-
-        // Mark the issue seen BEFORE spawning the session. A crash between this
-        // write and newSession() leaves a phantom marker (no session) — the
-        // issue is skipped, never worked twice.
-        await kv.set<SeenEntry>(seenKey, {
-          issueNumber: issue.number,
-          createdAt: new Date().toISOString(),
-        });
-
-        let sessionId: string;
+      async function poll(): Promise<void> {
+        let issues: GitHubIssue[];
         try {
-          const session = await hive.newSession({
-            name: issueSlug(issue.number, issue.title),
-            remote: `https://github.com/${repo}`,
-            context: `Issue #${issue.number}: ${issue.title}\n${issue.html_url}`,
-          });
-          sessionId = session.id;
+          issues = await fetchIssues(token, repo, labels, assignee);
         } catch (err) {
-          // Remove the marker so a transient failure can be retried next poll.
-          await kv.delete(seenKey);
-          logger.error("GitHub Issues: failed to create session", {
-            issueNumber: issue.number,
+          logger.error("GitHub Issues: poll failed", {
             error: err instanceof Error ? err.message : String(err),
           });
-          continue;
+          return;
         }
 
-        await kv.set<SeenEntry>(seenKey, {
-          sessionId,
-          issueNumber: issue.number,
-          createdAt: new Date().toISOString(),
-        });
-        await kv.set<SessionEntry>(`session:${sessionId}`, {
-          issueId: issue.id,
-          issueNumber: issue.number,
-          repo: repo as string,
+        for (const issue of issues) {
+          const seenKey = `seen:${issue.id}`;
+          if (await kv.has(seenKey)) continue;
+
+          if (maxOpenSessions !== undefined) {
+            const openCount = hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length;
+            if (openCount >= maxOpenSessions) {
+              logger.info("GitHub Issues: max open sessions reached, deferring issue", {
+                issueNumber: issue.number,
+                openCount,
+                maxOpenSessions,
+              });
+              break;
+            }
+          }
+
+          logger.info("GitHub Issues: new issue found, creating session", {
+            issueNumber: issue.number,
+            title: issue.title,
+          });
+
+          // Mark the issue seen BEFORE spawning the session. A crash between this
+          // write and newSession() leaves a phantom marker (no session) — the
+          // issue is skipped, never worked twice.
+          await kv.set<SeenEntry>(seenKey, {
+            issueNumber: issue.number,
+            createdAt: new Date().toISOString(),
+          });
+
+          let sessionId: string;
+          try {
+            const session = await hive.newSession({
+              name: issueSlug(issue.number, issue.title),
+              remote: `https://github.com/${repo}`,
+              context: `Issue #${issue.number}: ${issue.title}\n${issue.html_url}`,
+            });
+            sessionId = session.id;
+          } catch (err) {
+            // Remove the marker so a transient failure can be retried next poll.
+            await kv.delete(seenKey);
+            logger.error("GitHub Issues: failed to create session", {
+              issueNumber: issue.number,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            continue;
+          }
+
+          await kv.set<SeenEntry>(seenKey, {
+            sessionId,
+            issueNumber: issue.number,
+            createdAt: new Date().toISOString(),
+          });
+          await kv.set<SessionEntry>(`session:${sessionId}`, {
+            issueId: issue.id,
+            issueNumber: issue.number,
+            repo,
+          });
+
+          if (inProgressLabel) {
+            try {
+              await addLabel(token, repo, issue.number, inProgressLabel);
+            } catch (err) {
+              logger.warn("GitHub Issues: failed to add in-progress label", {
+                issueNumber: issue.number,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+      }
+
+      scheduler.interval(pollIntervalMs, poll);
+
+      hive.onSessionComplete(async ({ session }) => {
+        const entry = await kv.get<SessionEntry>(`session:${session.id}`);
+        if (!entry) return;
+
+        logger.info("GitHub Issues: session complete, PR review pending", {
+          issueNumber: entry.issueNumber,
+          sessionId: session.id,
         });
 
-        if (inProgressLabel) {
+        if (doneLabel) {
           try {
-            await addLabel(token, repo as string, issue.number, inProgressLabel);
+            await addLabel(token, entry.repo, entry.issueNumber, doneLabel);
           } catch (err) {
-            logger.warn("GitHub Issues: failed to add in-progress label", {
-              issueNumber: issue.number,
+            logger.warn("GitHub Issues: failed to add done label", {
+              issueNumber: entry.issueNumber,
               error: err instanceof Error ? err.message : String(err),
             });
           }
         }
-      }
-    }
 
-    scheduler.interval(pollIntervalMs, poll);
-
-    hive.onSessionComplete(async ({ session }) => {
-      const entry = await kv.get<SessionEntry>(`session:${session.id}`);
-      if (!entry) return;
-
-      logger.info("GitHub Issues: session complete, PR review pending", {
-        issueNumber: entry.issueNumber,
-        sessionId: session.id,
-      });
-
-      if (doneLabel) {
-        try {
-          await addLabel(token, entry.repo, entry.issueNumber, doneLabel);
-        } catch (err) {
-          logger.warn("GitHub Issues: failed to add done label", {
-            issueNumber: entry.issueNumber,
-            error: err instanceof Error ? err.message : String(err),
+        // Keep the "seen:" marker so the still-open issue is not re-spawned on the
+        // next poll. Stamp it as completed for observability. Drop the
+        // session-scoped entry since that session no longer exists.
+        const seen = await kv.get<SeenEntry>(`seen:${entry.issueId}`);
+        if (seen) {
+          await kv.set<SeenEntry>(`seen:${entry.issueId}`, {
+            ...seen,
+            completedAt: new Date().toISOString(),
           });
         }
-      }
-
-      // Keep the "seen:" marker so the still-open issue is not re-spawned on the
-      // next poll. Stamp it as completed for observability. Drop the
-      // session-scoped entry since that session no longer exists.
-      const seen = await kv.get<SeenEntry>(`seen:${entry.issueId}`);
-      if (seen) {
-        await kv.set<SeenEntry>(`seen:${entry.issueId}`, {
-          ...seen,
-          completedAt: new Date().toISOString(),
-        });
-      }
-      await kv.delete(`session:${session.id}`);
-    });
-  },
-});
+        await kv.delete(`session:${session.id}`);
+      });
+    },
+  });
+}
