@@ -144,8 +144,6 @@ export default definePlugin({
     const pollIntervalMs = Number(
       process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS ?? "300000",
     );
-    const cloneStrategy = (process.env.CONDUCTOR_GITHUB_CLONE_STRATEGY ??
-      "full") as "full" | "worktree";
     const tokenSecretKey =
       process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
     const tokenSource = process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE ?? "secret";
@@ -186,7 +184,6 @@ export default definePlugin({
       repo,
       labels,
       pollIntervalMs,
-      cloneStrategy,
     });
 
     async function poll(): Promise<void> {
