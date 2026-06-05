@@ -1,7 +1,7 @@
 import { resolveSignalInvocation } from "../../src/core/session.js";
 
 describe("resolveSignalInvocation", () => {
-  const originalArgv1 = process.argv[1];
+  const originalArgv1 = process.argv[1] ?? "";
   const originalExecPath = process.execPath;
 
   afterEach(() => {
