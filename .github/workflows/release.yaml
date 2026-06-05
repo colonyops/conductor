@@ -108,20 +108,11 @@ jobs:
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
-      - name: Build binary
+      - name: Build bundle
         run: |
-          bun build src/index.ts \
-            --compile \
-            --outfile dist/conductor-linux-x64
-        env:
-          BUN_TARGET: bun-linux-x64
-
-      - name: Build binary (macOS)
-        run: |
-          bun build src/index.ts \
-            --compile \
-            --target bun-darwin-arm64 \
-            --outfile dist/conductor-darwin-arm64
+          mkdir -p dist
+          bun build src/index.ts --outfile dist/conductor.js
+          tar -czf dist/conductor.tar.gz -C dist conductor.js
 
       - name: Create GitHub release
         env:
@@ -131,5 +122,4 @@ jobs:
           gh release create "$TAG" \
             --title "Release $TAG" \
             --notes "${{ steps.changelog.outputs.body }}" \
-            dist/conductor-linux-x64 \
-            dist/conductor-darwin-arm64
+            dist/conductor.tar.gz
