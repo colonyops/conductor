@@ -9,6 +9,7 @@ export interface HiveSessionRecord {
   inbox: string;
   state: "active" | "recycled";
   unread: number;
+  tags?: string[];
 }
 
 export interface HiveNewSessionArgs {
@@ -16,6 +17,7 @@ export interface HiveNewSessionArgs {
   remote: string;
   prompt?: string;
   agent?: string;
+  tags?: string[];
 }
 
 interface HiveBatchResult {
@@ -51,8 +53,14 @@ function extractJSON(raw: string): string {
   throw new Error("No JSON object found in hive batch output");
 }
 
-export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
-  const proc = Bun.spawn(["hive", "session", "list", "--json"], {
+export async function hiveSessionList(tags?: string[]): Promise<HiveSessionRecord[]> {
+  const args = ["hive", "session", "list", "--json"];
+  if (tags) {
+    for (const tag of tags) {
+      args.push("--tags", tag);
+    }
+  }
+  const proc = Bun.spawn(args, {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -87,6 +95,7 @@ export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; w
           remote: args.remote,
           ...(args.prompt !== undefined ? { prompt: args.prompt } : {}),
           ...(args.agent !== undefined ? { agent: args.agent } : {}),
+          ...(args.tags !== undefined ? { tags: args.tags } : {}),
         },
       ],
     });
@@ -153,8 +162,16 @@ async function acceptTrustPrompt(sessionName: string, workDir: string): Promise<
   await proc.exited;
 }
 
-export async function hiveRecycle(_sessionId: string): Promise<void> {
-  // No `hive recycle` CLI exists. hive auto-recycles sessions via `hive new`.
+export async function hiveRecycle(sessionId: string): Promise<void> {
+  const proc = Bun.spawn(["hive", "session", "recycle", sessionId], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`hive session recycle failed (exit ${exitCode}): ${err.trim()}`);
+  }
 }
 
 export { hiveDataDir };

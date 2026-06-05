@@ -34,7 +34,7 @@ Sessions are recycled (cleaned up via `hive recycle`) only when they reach `COMP
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime
-- `hive` CLI installed and on `PATH`
+- `hive` CLI >= v0.53.0 installed and on `PATH`
 
 ## Installation
 
