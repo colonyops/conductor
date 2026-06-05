@@ -55,7 +55,7 @@ describe("07 — hook injection", () => {
 
     const stopCmd = settings.hooks.Stop[0]?.hooks[0]?.command ?? "";
     expect(stopCmd).toContain(`--session ${session.id}`);
-    expect(stopCmd).toContain("conductor signal stop");
+    expect(stopCmd).toContain("signal stop");
   });
 
   it("PostToolUse hook command references the session id", async () => {
@@ -73,6 +73,6 @@ describe("07 — hook injection", () => {
 
     const activityCmd = settings.hooks.PostToolUse[0]?.hooks[0]?.command ?? "";
     expect(activityCmd).toContain(`--session ${session.id}`);
-    expect(activityCmd).toContain("conductor signal activity");
+    expect(activityCmd).toContain("signal activity");
   });
 });

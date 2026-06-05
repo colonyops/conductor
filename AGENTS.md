@@ -1,22 +1,15 @@
-# CLAUDE.md
+You are an autonomous agent working independently without human interaction. Do not ask clarifying questions — make reasonable assumptions and proceed.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Hook Signal Resolution
 
-## Commands
+Claude Code hooks are injected into `.claude/settings.local.json` in each session's work directory. These hooks call `conductor signal stop` and `conductor signal activity` to drive session state transitions.
 
-```bash
-bun install                          # install dependencies
-bun run conductor start              # start the daemon
-bun run lint                         # biome check src/ tests/
-bun run format                       # biome format --write src/ tests/
-bun run typecheck                    # tsc --noEmit (pre-existing type errors exist; don't introduce new ones)
-bun test tests/unit/                 # unit tests (fast, no external deps)
-bun test tests/unit/lifecycle.test.ts  # single test file
-bun run test:integration             # integration tests (requires hive CLI, 120s timeout)
-bun run test:e2e                     # e2e tests
-```
+Because `conductor` may not be on `PATH` in a development environment (when running via `bun run src/index.ts`), the injected commands use **absolute paths** resolved at hook-injection time:
 
-## Architecture
+- **Dev mode** (`bun run src/index.ts`): hooks are injected as `<bun-path> <script-path> signal <event> --session <id>`
+- **Installed binary**: hooks are injected as `<conductor-binary-path> signal <event> --session <id>`
+
+This is handled by `resolveSignalInvocation()` in `src/core/session.ts`, which checks whether `process.argv[1]` ends with `.ts` to distinguish the two modes.
 
 Conductor is a Bun/TypeScript daemon. The flow is:
 
