@@ -211,7 +211,6 @@ export default definePlugin({
           const session = await hive.newSession({
             name: `gh-issue-${issue.number}`,
             remote: `https://github.com/${repo}`,
-            cloneStrategy,
             context: `Issue #${issue.number}: ${issue.title}\n${issue.html_url}`,
           });
           sessionId = session.id;
