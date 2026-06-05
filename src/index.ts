@@ -591,4 +591,84 @@ program
     console.log(PLUGIN_DOCS);
   });
 
+const kvCmd = program
+  .command("kv")
+  .description("Inspect and manage plugin KV state");
+
+kvCmd
+  .command("list")
+  .description("List all keys, optionally scoped to a plugin")
+  .option("--plugin <id>", "Scope to a specific plugin")
+  .action((opts: { plugin?: string }) => {
+    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    try {
+      const entries = kv.listEntries(opts.plugin);
+      if (entries.length === 0) {
+        console.log("(empty)");
+        return;
+      }
+      if (opts.plugin) {
+        for (const e of entries) console.log(e.key);
+      } else {
+        let lastPlugin = "";
+        for (const e of entries) {
+          if (e.pluginId !== lastPlugin) {
+            if (lastPlugin !== "") console.log();
+            console.log(`[${e.pluginId}]`);
+            lastPlugin = e.pluginId;
+          }
+          console.log(`  ${e.key}`);
+        }
+      }
+    } finally {
+      kv.close();
+    }
+  });
+
+kvCmd
+  .command("get <key>")
+  .description("Print a single value as JSON")
+  .requiredOption("--plugin <id>", "Plugin to read from")
+  .action(async (key: string, opts: { plugin: string }) => {
+    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    try {
+      const value = await kv.forPlugin(opts.plugin).get(key);
+      if (value === undefined) {
+        console.error(`Key not found: ${key}`);
+        process.exit(1);
+      }
+      console.log(JSON.stringify(value, null, 2));
+    } finally {
+      kv.close();
+    }
+  });
+
+kvCmd
+  .command("delete <key>")
+  .description("Delete a single key")
+  .requiredOption("--plugin <id>", "Plugin to delete from")
+  .action(async (key: string, opts: { plugin: string }) => {
+    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    try {
+      await kv.forPlugin(opts.plugin).delete(key);
+      console.log(`Deleted: ${key}`);
+    } finally {
+      kv.close();
+    }
+  });
+
+kvCmd
+  .command("clear")
+  .description("Delete all keys for a plugin")
+  .requiredOption("--plugin <id>", "Plugin to clear")
+  .action(async (opts: { plugin: string }) => {
+    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    try {
+      await kv.forPlugin(opts.plugin).clear();
+      console.log(`Cleared all keys for plugin: ${opts.plugin}`);
+    } finally {
+      kv.close();
+    }
+  });
+
 program.parseAsync(process.argv);
