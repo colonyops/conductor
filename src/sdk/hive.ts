@@ -6,7 +6,6 @@ export interface NewSessionOptions {
   name: string;
   remote: string;
   context?: string;
-  cloneStrategy?: "full" | "worktree";
   agent?: string;
   idleTimeoutMs?: number;
   prePromptOverride?: string;

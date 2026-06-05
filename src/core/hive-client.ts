@@ -1,4 +1,3 @@
-import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -14,17 +13,37 @@ export interface HiveSessionRecord {
 export interface HiveNewSessionArgs {
   name: string;
   remote: string;
-  background?: boolean;
-  cloneStrategy?: "full" | "worktree";
+  prompt?: string;
   agent?: string;
+}
+
+interface HiveBatchResult {
+  name: string;
+  session_id: string;
+  path: string;
+  status: "created" | "failed" | "skipped";
+  error?: string;
+}
+
+interface HiveBatchOutput {
+  batch_id: string;
+  log_file: string;
+  results: HiveBatchResult[];
 }
 
 function hiveDataDir(): string {
   return process.env.HIVE_DATA_DIR ?? join(homedir(), ".local/share/hive");
 }
 
-function deriveWorkDir(repo: string, sessionId: string): string {
-  return join(hiveDataDir(), "repos", `${repo}-${sessionId}`);
+function extractJSON(raw: string): string {
+  // Strip ANSI escape codes, then find the last top-level JSON object
+  // (hook output precedes it on stdout).
+  const clean = raw.replace(/\x1b\[[0-9;]*[mGKHF]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+  const idx = clean.lastIndexOf("\n{");
+  if (idx !== -1) return clean.slice(idx + 1);
+  const fallback = clean.indexOf("{");
+  if (fallback !== -1) return clean.slice(fallback);
+  throw new Error("No JSON object found in hive batch output");
 }
 
 export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
@@ -47,14 +66,12 @@ export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
     .map((line) => JSON.parse(line) as HiveSessionRecord);
 }
 
-// Serialize hiveNew calls: the before/after diff approach is not safe when
-// multiple calls run concurrently against the same hive DB and repos directory.
+// Serialize hiveNew calls to avoid races against the hive DB.
 let hiveNewQueue: Promise<void> = Promise.resolve();
 
 export async function hiveNew(
   args: HiveNewSessionArgs,
 ): Promise<{ id: string; workDir: string }> {
-  // Wait for any in-flight hiveNew call to finish before starting this one.
   const prev = hiveNewQueue;
   let release!: () => void;
   hiveNewQueue = new Promise<void>((resolve) => {
@@ -62,47 +79,45 @@ export async function hiveNew(
   });
   await prev;
   try {
-    const before = await hiveSessionList();
-    const beforeIds = new Set(before.map((s) => s.id));
+    const input = JSON.stringify({
+      sessions: [
+        {
+          name: args.name,
+          remote: args.remote,
+          ...(args.prompt !== undefined ? { prompt: args.prompt } : {}),
+          ...(args.agent !== undefined ? { agent: args.agent } : {}),
+        },
+      ],
+    });
 
-    // Snapshot repos directory before cloning so we can detect the new workspace.
-    // The workspace directory ID differs from the session ID in hive's data model.
-    const reposDir = join(hiveDataDir(), "repos");
-    const beforeRepos = new Set(
-      existsSync(reposDir) ? readdirSync(reposDir) : [],
-    );
-
-    const cmd = ["hive", "new", args.name, "--remote", args.remote];
-    if (args.background) cmd.push("--background");
-    if (args.cloneStrategy) cmd.push("--clone-strategy", args.cloneStrategy);
-    if (args.agent) cmd.push("--agent", args.agent);
-
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn(["hive", "batch"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    proc.stdin.write(input);
+    proc.stdin.end();
     await proc.exited;
-    // Do not fail on non-zero exit: `hive new --background` often exits non-zero
-    // due to terminal spawning failures (e.g., duplicate tmux session name) even
-    // when the session workspace was successfully cloned. Session creation success
-    // is determined by whether a new session appears in the session list.
 
-    const after = await hiveSessionList();
-    const newSession = after.find((s) => !beforeIds.has(s.id));
-    if (!newSession) {
-      const err = await new Response(proc.stderr).text();
+    const raw = await new Response(proc.stdout).text();
+
+    let parsed: HiveBatchOutput;
+    try {
+      parsed = JSON.parse(extractJSON(raw)) as HiveBatchOutput;
+    } catch (e) {
       throw new Error(
-        `hive new did not create a session. stderr: ${err.trim()}`,
+        `Failed to parse hive batch output: ${e instanceof Error ? e.message : String(e)}\nRaw output: ${raw}`,
       );
     }
 
-    // Find the newly created workspace directory. This must be detected by
-    // directory scanning because hive's workspace-directory ID (the suffix in
-    // repos/<repo>-<suffix>) is distinct from the session's id field.
-    const afterRepos = existsSync(reposDir) ? readdirSync(reposDir) : [];
-    const newRepoDir = afterRepos.find((dir) => !beforeRepos.has(dir));
-    const workDir = newRepoDir
-      ? join(reposDir, newRepoDir)
-      : deriveWorkDir(newSession.repo, newSession.id); // fallback (e.g. recycled session)
+    const result = parsed.results[0];
+    if (!result || result.status !== "created") {
+      throw new Error(
+        `hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`,
+      );
+    }
 
-    return { id: newSession.id, workDir };
+    return { id: result.session_id, workDir: result.path };
   } finally {
     release();
   }
@@ -111,3 +126,5 @@ export async function hiveNew(
 export async function hiveRecycle(_sessionId: string): Promise<void> {
   // No `hive recycle` CLI exists. hive auto-recycles sessions via `hive new`.
 }
+
+export { hiveDataDir };

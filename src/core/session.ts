@@ -109,7 +109,6 @@ export interface CreateSessionOptions {
   remote: string;
   pluginId: string;
   context?: string;
-  cloneStrategy?: "full" | "worktree";
   agent?: string;
   idleTimeoutMs?: number;
   prePromptOverride?: string;
@@ -140,14 +139,12 @@ export class SessionManager {
   async createSession(opts: CreateSessionOptions): Promise<Session> {
     const release = await this.globalLimiter.acquire();
     try {
-      const hiveArgs: Parameters<typeof hiveNew>[0] = {
+      const { id, workDir } = await hiveNew({
         name: opts.name,
         remote: opts.remote,
-        background: true,
-      };
-      if (opts.cloneStrategy) hiveArgs.cloneStrategy = opts.cloneStrategy;
-      if (opts.agent) hiveArgs.agent = opts.agent;
-      const { id, workDir } = await hiveNew(hiveArgs);
+        prompt: opts.context,
+        agent: opts.agent,
+      });
 
       // Ensure events dir exists
       mkdirSync(sessionEventsDir(id), { recursive: true });
