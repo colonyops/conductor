@@ -16,6 +16,9 @@ export interface KVStore {
 type KVRow = { value: string };
 type CountRow = { c: number };
 type KeyRow = { key: string };
+type AllKeyRow = { plugin_id: string; key: string; value: string };
+
+export type KVEntry = { pluginId: string; key: string; value: string };
 
 export class BunSqliteKVStore implements KVStore {
   constructor(
@@ -78,6 +81,8 @@ export class BunSqliteKVStore implements KVStore {
 
 export function openKVDatabase(dataDir: string): {
   forPlugin(pluginId: string): KVStore;
+  /** List all entries, optionally scoped to a single plugin. */
+  listEntries(pluginId?: string): KVEntry[];
   close(): void;
 } {
   const dbPath = join(dataDir, "kv.db");
@@ -97,6 +102,30 @@ export function openKVDatabase(dataDir: string): {
   return {
     forPlugin(pluginId) {
       return new BunSqliteKVStore(pluginId, db);
+    },
+    listEntries(pluginId?: string): KVEntry[] {
+      if (pluginId !== undefined) {
+        const rows = db
+          .query<AllKeyRow, [string]>(
+            "SELECT plugin_id, key, value FROM kv WHERE plugin_id = ? ORDER BY key",
+          )
+          .all(pluginId);
+        return rows.map((r) => ({
+          pluginId: r.plugin_id,
+          key: r.key,
+          value: r.value,
+        }));
+      }
+      const rows = db
+        .query<AllKeyRow, []>(
+          "SELECT plugin_id, key, value FROM kv ORDER BY plugin_id, key",
+        )
+        .all();
+      return rows.map((r) => ({
+        pluginId: r.plugin_id,
+        key: r.key,
+        value: r.value,
+      }));
     },
     close() {
       db.close();
