@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Logger } from "../sdk/logger.js";
 
 export interface HiveSessionRecord {
   id: string;
@@ -18,6 +19,7 @@ export interface HiveNewSessionArgs {
   prompt?: string;
   agent?: string;
   tags?: string[];
+  logger?: Logger;
 }
 
 interface HiveBatchResult {
@@ -132,7 +134,7 @@ export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; w
       throw new Error(`hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`);
     }
 
-    await acceptTrustPrompt(result.name, result.path);
+    await acceptTrustPrompt(result.name, result.path, args.logger ? { logger: args.logger } : {});
 
     return { id: result.session_id, workDir: result.path, existed: false };
   } finally {
@@ -146,20 +148,94 @@ function encodeProjectPath(absPath: string): string {
   return absPath.replace(/\//g, "-").replace(/\./g, "");
 }
 
-async function acceptTrustPrompt(sessionName: string, workDir: string): Promise<void> {
-  const projectDir = join(homedir(), ".claude", "projects", encodeProjectPath(workDir));
-  if (existsSync(projectDir)) {
+// Matches Claude Code's "Do you trust the files in this folder?" trust dialog.
+const TRUST_PROMPT_PATTERN = /do you trust the files|trust the files in this folder/i;
+
+// External operations acceptTrustPrompt depends on, injectable for testing.
+export interface AcceptTrustDeps {
+  capturePane(target: string): Promise<{ ok: boolean; content: string }>;
+  sendKeys(target: string, keys: string[]): Promise<boolean>;
+  sleep(ms: number): Promise<void>;
+  alreadyTrusted(workDir: string): boolean;
+}
+
+async function tmuxCapturePane(target: string): Promise<{ ok: boolean; content: string }> {
+  const proc = Bun.spawn(["tmux", "capture-pane", "-t", target, "-p"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await proc.exited;
+  const content = await new Response(proc.stdout).text();
+  return { ok: exitCode === 0, content };
+}
+
+async function tmuxSendKeys(target: string, keys: string[]): Promise<boolean> {
+  const proc = Bun.spawn(["tmux", "send-keys", "-t", target, ...keys], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return (await proc.exited) === 0;
+}
+
+const defaultTrustDeps: AcceptTrustDeps = {
+  capturePane: tmuxCapturePane,
+  sendKeys: tmuxSendKeys,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  alreadyTrusted: (workDir) => existsSync(join(homedir(), ".claude", "projects", encodeProjectPath(workDir))),
+};
+
+export interface AcceptTrustOptions {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+  logger?: Logger;
+  deps?: AcceptTrustDeps;
+}
+
+// acceptTrustPrompt accepts Claude Code's first-run trust dialog for a freshly
+// created session. It polls the tmux pane until the prompt is rendered rather
+// than guessing a fixed delay, checks the send-keys exit code, and logs a
+// warning when the prompt never appears or the keystroke cannot be delivered.
+export async function acceptTrustPrompt(
+  sessionName: string,
+  workDir: string,
+  options: AcceptTrustOptions = {},
+): Promise<void> {
+  const { pollIntervalMs = 250, timeoutMs = 15_000, logger, deps = defaultTrustDeps } = options;
+
+  if (deps.alreadyTrusted(workDir)) {
     // Directory already trusted from a prior session — no prompt will appear.
     return;
   }
 
-  // New directory: wait for Claude Code to render the trust prompt, then accept.
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-  const proc = Bun.spawn(["tmux", "send-keys", "-t", `${sessionName}:claude`, "", "Enter"], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const target = `${sessionName}:claude`;
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+  let paneAccessible = false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { ok, content } = await deps.capturePane(target);
+    paneAccessible = paneAccessible || ok;
+
+    if (ok && TRUST_PROMPT_PATTERN.test(content)) {
+      const sent = await deps.sendKeys(target, ["Enter"]);
+      if (sent) {
+        logger?.debug("accepted trust prompt", { session: sessionName, target, attempt });
+      } else {
+        logger?.warn("trust prompt detected but tmux send-keys failed", { session: sessionName, target });
+      }
+      return;
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await deps.sleep(pollIntervalMs);
+    }
+  }
+
+  logger?.warn("trust prompt not detected before timeout; session may be blocked on the trust dialog", {
+    session: sessionName,
+    target,
+    timeoutMs,
+    paneAccessible,
   });
-  await proc.exited;
 }
 
 export async function hiveRecycle(sessionId: string): Promise<void> {
