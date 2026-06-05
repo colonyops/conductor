@@ -1,3 +1,4 @@
+import type { Logger } from "../sdk/logger.js";
 import type { CoreEventName, CoreEventPayload } from "../types.js";
 
 export type EventHandler<E extends CoreEventName> = (payload: CoreEventPayload<E>) => Promise<void>;
@@ -6,6 +7,11 @@ const HANDLER_TIMEOUT_MS = 30_000;
 
 export class EventBus {
   private handlers = new Map<string, EventHandler<CoreEventName>[]>();
+  private logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
+  }
 
   on<E extends CoreEventName>(event: E, handler: EventHandler<E>): () => void {
     const list = this.handlers.get(event) ?? [];
@@ -28,7 +34,10 @@ export class EventBus {
           ),
         ]);
       } catch (err) {
-        console.error(`EventBus: handler error for "${event}":`, err instanceof Error ? err.message : err);
+        this.logger.error("event handler error", {
+          event,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }

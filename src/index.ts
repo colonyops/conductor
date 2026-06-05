@@ -450,7 +450,7 @@ program
       });
       const kvDatabase = openKVDatabase(conductorDataDir());
       const secrets = createSecretsClient();
-      const eventBus = new EventBus();
+      const eventBus = new EventBus(logger.with({ component: "eventbus" }));
       const globalLimiter = createConcurrencyLimiter(config.concurrency.global);
       const sessionManager = new SessionManager({
         config,
