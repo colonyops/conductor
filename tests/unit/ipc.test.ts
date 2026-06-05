@@ -2,8 +2,8 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Set the override env var BEFORE importing ipc.ts so CONDUCTOR_DATA_DIR
-// is resolved to our temp dir when the module initializes.
+// Point the data dir at a temp dir. conductorDataDir() reads this env var on
+// each call, so it just needs to be set before any ipc function runs.
 const TEST_DATA_DIR = join(tmpdir(), `conductor-ipc-test-${process.pid}`);
 process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE = TEST_DATA_DIR;
 

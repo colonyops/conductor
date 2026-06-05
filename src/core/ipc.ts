@@ -8,9 +8,6 @@ export function conductorDataDir(): string {
   return process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ?? resolvePath("~/.local/conductor");
 }
 
-// Keep the named export for callers that reference the value directly.
-export const CONDUCTOR_DATA_DIR = conductorDataDir();
-
 export function sessionEventsDir(sessionId: string): string {
   return join(conductorDataDir(), "sessions", sessionId, "events");
 }

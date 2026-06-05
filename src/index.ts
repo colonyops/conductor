@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
 import { EventBus } from "./core/events.js";
-import { CONDUCTOR_DATA_DIR, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
+import { conductorDataDir, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
 import { createMetrics, startMetricsServer } from "./core/observability.js";
 import { SessionManager } from "./core/session.js";
 import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
@@ -448,7 +448,7 @@ program
         format: config.observability.logFormat,
         caller: config.observability.logCaller,
       });
-      const kvDatabase = openKVDatabase(CONDUCTOR_DATA_DIR);
+      const kvDatabase = openKVDatabase(conductorDataDir());
       const secrets = createSecretsClient();
       const eventBus = new EventBus();
       const globalLimiter = createConcurrencyLimiter(config.concurrency.global);
@@ -501,7 +501,7 @@ program
       await eventBus.emit("conductorStart", {});
       logger.info("Conductor started", {
         pluginCount: registrations.length,
-        dataDir: CONDUCTOR_DATA_DIR,
+        dataDir: conductorDataDir(),
       });
 
       await new Promise<never>(() => {});
@@ -576,7 +576,7 @@ kvCmd
   .description("List all keys, optionally scoped to a plugin")
   .option("--plugin <id>", "Scope to a specific plugin")
   .action((opts: { plugin?: string }) => {
-    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    const kv = openKVDatabase(conductorDataDir());
     try {
       const entries = kv.listEntries(opts.plugin);
       if (entries.length === 0) {
@@ -606,7 +606,7 @@ kvCmd
   .description("Print a single value as JSON")
   .requiredOption("--plugin <id>", "Plugin to read from")
   .action(async (key: string, opts: { plugin: string }) => {
-    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    const kv = openKVDatabase(conductorDataDir());
     try {
       const value = await kv.forPlugin(opts.plugin).get(key);
       if (value === undefined) {
@@ -624,7 +624,7 @@ kvCmd
   .description("Delete a single key")
   .requiredOption("--plugin <id>", "Plugin to delete from")
   .action(async (key: string, opts: { plugin: string }) => {
-    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    const kv = openKVDatabase(conductorDataDir());
     try {
       await kv.forPlugin(opts.plugin).delete(key);
       console.log(`Deleted: ${key}`);
@@ -638,7 +638,7 @@ kvCmd
   .description("Delete all keys for a plugin")
   .requiredOption("--plugin <id>", "Plugin to clear")
   .action(async (opts: { plugin: string }) => {
-    const kv = openKVDatabase(CONDUCTOR_DATA_DIR);
+    const kv = openKVDatabase(conductorDataDir());
     try {
       await kv.forPlugin(opts.plugin).clear();
       console.log(`Cleared all keys for plugin: ${opts.plugin}`);
