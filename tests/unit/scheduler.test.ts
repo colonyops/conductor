@@ -6,6 +6,7 @@ const noopLogger: Logger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+  with: () => noopLogger,
 };
 
 describe("createScheduler", () => {
