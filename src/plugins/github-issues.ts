@@ -44,22 +44,6 @@ async function fetchIssues(token: string, repo: string, labels: string[]): Promi
   return res.json() as Promise<GitHubIssue[]>;
 }
 
-async function closeIssue(token: string, repo: string, issueNumber: number): Promise<void> {
-  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ state: "closed" }),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to close issue #${issueNumber}: HTTP ${res.status}`);
-  }
-}
-
 async function addLabel(token: string, repo: string, issueNumber: number, label: string): Promise<void> {
   const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/labels`, {
     method: "POST",
@@ -222,18 +206,10 @@ export default definePlugin({
       const entry = await kv.get<SessionEntry>(`session:${session.id}`);
       if (!entry) return;
 
-      try {
-        await closeIssue(token, entry.repo, entry.issueNumber);
-        logger.info("GitHub Issues: closed issue on session complete", {
-          issueNumber: entry.issueNumber,
-          sessionId: session.id,
-        });
-      } catch (err) {
-        logger.error("GitHub Issues: failed to close issue", {
-          issueNumber: entry.issueNumber,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      logger.info("GitHub Issues: session complete, PR review pending", {
+        issueNumber: entry.issueNumber,
+        sessionId: session.id,
+      });
 
       if (doneLabel) {
         try {
