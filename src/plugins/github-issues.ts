@@ -148,6 +148,7 @@ export default definePlugin({
       "full") as "full" | "worktree";
     const tokenSecretKey =
       process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY ?? "github.token";
+    const tokenSource = process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE ?? "secret";
     const inProgressLabel = process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL;
     const doneLabel = process.env.CONDUCTOR_GITHUB_DONE_LABEL;
 
@@ -171,6 +172,7 @@ export default definePlugin({
     try {
       token = await secrets.get(tokenSecretKey, {
         env: "GITHUB_TOKEN",
+        ghCLI: tokenSource === "gh-cli",
       });
     } catch (err) {
       logger.error("GitHub Issues plugin: failed to resolve token", {

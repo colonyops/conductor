@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "conductor": "bun src/index.ts",
+    "start": "bun src/index.ts start",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ tests/",
     "format": "biome format --write src/ tests/",

@@ -1,7 +1,6 @@
 import { createInterface } from "node:readline";
 import {
   type ConductorConfig,
-  resolveConfigPath,
   resolvePath,
   writeConfig,
 } from "../config.js";
@@ -308,6 +307,91 @@ export async function loadPlugins(opts: {
       meta: plugin,
       filePath,
       hash,
+      teardown() {
+        scheduler.cancelAll();
+        for (const unsub of unsubscribes) unsub();
+      },
+    });
+
+    globalLogger.info("Plugin loaded", {
+      pluginId: plugin.id,
+      name: plugin.name,
+    });
+  }
+
+  // Load builtin: github-issues
+  const giConfig = config.builtins["github-issues"];
+  if (giConfig) {
+    process.env.CONDUCTOR_GITHUB_REPO = giConfig.repo;
+    process.env.CONDUCTOR_GITHUB_LABELS = giConfig.labels.join(",");
+    process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(
+      giConfig.pollIntervalMs,
+    );
+    process.env.CONDUCTOR_GITHUB_CLONE_STRATEGY = giConfig.cloneStrategy;
+    process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY = giConfig.tokenSecretKey;
+    process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = giConfig.tokenSource;
+    if (giConfig.inProgressLabel) {
+      process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL = giConfig.inProgressLabel;
+    }
+    if (giConfig.doneLabel) {
+      process.env.CONDUCTOR_GITHUB_DONE_LABEL = giConfig.doneLabel;
+    }
+
+    let builtinModule: { default: Plugin };
+    try {
+      builtinModule = (await import("./github-issues.js")) as {
+        default: Plugin;
+      };
+    } catch (err) {
+      globalLogger.error("Failed to import builtin github-issues plugin", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return registrations;
+    }
+
+    const plugin = builtinModule.default;
+    const pluginLogger = createLogger({
+      pluginName: plugin.name,
+      logPath: resolvePath(config.observability.logPath),
+      logMaxBytes: config.observability.logMaxBytes,
+      logMaxBackups: config.observability.logMaxBackups,
+    });
+    const scheduler = createScheduler(pluginLogger);
+    const kv: KVStore = kvDatabase.forPlugin(plugin.id);
+    const unsubscribes: Array<() => void> = [];
+    const baseHive = createHiveClient({
+      pluginId: plugin.id,
+      sessionManager,
+      eventBus,
+    });
+    const hive = makeTrackingHiveClient(baseHive, unsubscribes);
+    const http = createHttpClient(pluginLogger);
+    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http };
+
+    try {
+      await Promise.race([
+        plugin.init(ctx),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`),
+              ),
+            INIT_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      globalLogger.error("Builtin github-issues init failed", { error: msg });
+      scheduler.cancelAll();
+      return registrations;
+    }
+
+    registrations.push({
+      meta: plugin,
+      filePath: "(builtin)",
+      hash: "(builtin)",
       teardown() {
         scheduler.cancelAll();
         for (const unsub of unsubscribes) unsub();

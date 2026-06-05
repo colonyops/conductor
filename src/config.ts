@@ -14,6 +14,7 @@ export interface PluginEntry {
 
 export interface GitHubIssuesBuiltinConfig {
   tokenSecretKey: string;
+  tokenSource: "secret" | "gh-cli";
   repo: string;
   labels: string[];
   pollIntervalMs: number;
@@ -68,6 +69,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 const GITHUB_ISSUES_DEFAULTS: GitHubIssuesBuiltinConfig = {
   tokenSecretKey: "github.token",
+  tokenSource: "secret",
   repo: "",
   labels: [],
   pollIntervalMs: 300_000,
@@ -84,6 +86,7 @@ function buildBuiltins(
     "github-issues": {
       tokenSecretKey:
         gi.tokenSecretKey ?? GITHUB_ISSUES_DEFAULTS.tokenSecretKey,
+      tokenSource: gi.tokenSource ?? GITHUB_ISSUES_DEFAULTS.tokenSource,
       repo: gi.repo ?? GITHUB_ISSUES_DEFAULTS.repo,
       labels: gi.labels ?? GITHUB_ISSUES_DEFAULTS.labels,
       pollIntervalMs:
@@ -180,6 +183,16 @@ function validateGitHubIssuesBuiltin(raw: unknown): ConfigError[] {
     errors.push({
       field: `${p}.cloneStrategy`,
       message: 'must be "full" or "worktree"',
+    });
+  }
+  if (
+    raw.tokenSource !== undefined &&
+    raw.tokenSource !== "secret" &&
+    raw.tokenSource !== "gh-cli"
+  ) {
+    errors.push({
+      field: `${p}.tokenSource`,
+      message: 'must be "secret" or "gh-cli"',
     });
   }
   return errors;

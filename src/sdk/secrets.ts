@@ -1,6 +1,8 @@
 export interface GetSecretOptions {
   /** If set, try process.env[env] first. */
   env?: string;
+  /** If true, try `gh auth token` before falling back to keychain. */
+  ghCLI?: boolean;
   /** If true, prompt interactively when not found and store in OS keychain. */
   promptIfMissing?: boolean;
 }
@@ -98,6 +100,22 @@ async function keychainSet(key: string, value: string): Promise<void> {
   }
 }
 
+async function ghCLIToken(): Promise<string | undefined> {
+  try {
+    const proc = Bun.spawn(["gh", "auth", "token"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const code = await proc.exited;
+    if (code !== 0) return undefined;
+    const out = await new Response(proc.stdout).text();
+    return out.trim() || undefined;
+  } catch {
+    // gh not installed
+  }
+  return undefined;
+}
+
 async function promptStdin(key: string): Promise<string> {
   process.stdout.write(`Enter secret for "${key}": `);
   return new Promise<string>((resolve) => {
@@ -118,6 +136,11 @@ export function createSecretsClient(): SecretsClient {
         if (val) return val;
       }
 
+      if (opts.ghCLI) {
+        const val = await ghCLIToken();
+        if (val !== undefined) return val;
+      }
+
       const fromKeychain = await keychainGet(key);
       if (fromKeychain !== undefined) return fromKeychain;
 
@@ -127,7 +150,9 @@ export function createSecretsClient(): SecretsClient {
         return val;
       }
 
-      throw new Error(`Secret "${key}" not found in env or keychain`);
+      throw new Error(
+        `Secret "${key}" not found${opts.ghCLI ? " (gh auth token returned nothing)" : ""} in env or keychain`,
+      );
     },
 
     async set(key, value) {

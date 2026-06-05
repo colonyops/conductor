@@ -1,0 +1,13 @@
+{
+  "builtins": {
+    "github-issues": {
+      "repo": "colonyops/conductor",
+      "labels": ["conductor/task"],
+      "inProgressLabel": "conductor/in-progress",
+      "doneLabel": "conductor/done",
+      "cloneStrategy": "full",
+      "pollIntervalMs": 60000,
+      "tokenSource": "gh-cli"
+    }
+  }
+}
