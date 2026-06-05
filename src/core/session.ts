@@ -1,12 +1,11 @@
 import { mkdirSync, rmSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
 import type { Logger } from "../sdk/logger.js";
 import type { Session, SessionEvent } from "../types.js";
 import type { EventBus } from "./events.js";
 import { hiveNew, hiveRecycle } from "./hive-client.js";
-import { conductorDataDir, sessionEventsDir } from "./ipc.js";
+import { sessionEventsDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
 
 // ── Hook injection helpers ────────────────────────────────────────────────────
@@ -296,7 +295,6 @@ export class SessionManager {
   private async recycleSession(session: Session): Promise<void> {
     try {
       await hiveRecycle(session.id);
-      this.cleanupSessionDir(session.id);
       await this.eventBus.emit("sessionRecycled", { session });
     } catch (err) {
       await this.eventBus.emit("sessionError", {
@@ -306,15 +304,13 @@ export class SessionManager {
     } finally {
       this.sessions.delete(session.id);
       this.cancelIdleTimer(session.id);
-    }
-  }
-
-  private cleanupSessionDir(sessionId: string): void {
-    const sessionDir = join(conductorDataDir(), "sessions", sessionId);
-    try {
-      rmSync(sessionDir, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup — ignore errors
+      // Delete only the events subdir so a reused session ID starts clean.
+      // Runs in finally to guarantee cleanup even when hiveRecycle throws.
+      try {
+        rmSync(sessionEventsDir(session.id), { recursive: true, force: true });
+      } catch {
+        // best-effort — ignore unexpected errors
+      }
     }
   }
 
