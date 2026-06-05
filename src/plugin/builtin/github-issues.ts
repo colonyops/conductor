@@ -1,4 +1,4 @@
-import { definePlugin } from "../sdk/index.js";
+import { definePlugin } from "../../sdk/index.js";
 
 // ── GitHub API types ──────────────────────────────────────────────────────────
 

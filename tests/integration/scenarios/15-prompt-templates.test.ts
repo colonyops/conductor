@@ -1,4 +1,4 @@
-import { buildPromptWithTemplates } from "../../../src/core/session.js";
+import { buildPromptWithTemplates } from "../../../src/session/manager.js";
 
 const PRE = "You are running as a headless agent.";
 const POST = "When done, open a draft PR.";

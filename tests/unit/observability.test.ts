@@ -1,4 +1,4 @@
-import { createMetrics, startMetricsServer } from "../../src/core/observability.js";
+import { createMetrics, startMetricsServer } from "../../src/observability/metrics.js";
 
 describe("createMetrics", () => {
   it("returns a registry and all 10 standard metric handles", () => {

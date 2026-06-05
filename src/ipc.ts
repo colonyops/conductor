@@ -1,8 +1,8 @@
 import { mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import { watch } from "node:fs";
 import { join } from "node:path";
-import { resolvePath } from "../config.js";
-import type { IpcEvent, IpcSignal } from "../types.js";
+import { resolvePath } from "./config.js";
+import type { IpcEvent, IpcSignal } from "./types.js";
 
 export const CONDUCTOR_DATA_DIR = process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE ?? resolvePath("~/.local/conductor");
 

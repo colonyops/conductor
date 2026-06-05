@@ -8,8 +8,8 @@ export type { LogLevel, LogEntry, Logger } from "./logger.js";
 export { createLogger } from "./logger.js";
 export type { GetSecretOptions, SecretsClient } from "./secrets.js";
 export { createSecretsClient } from "./secrets.js";
-export type { NewSessionOptions, HiveClient } from "./hive.js";
-export { createHiveClient } from "./hive.js";
+export type { NewSessionOptions, HiveClient } from "./client.js";
+export { createHiveClient } from "./client.js";
 export type { ConcurrencyLimiter } from "./concurrency.js";
 export { createConcurrencyLimiter } from "./concurrency.js";
 export type {

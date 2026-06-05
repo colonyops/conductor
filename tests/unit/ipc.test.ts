@@ -7,7 +7,7 @@ import { join } from "node:path";
 const TEST_DATA_DIR = join(tmpdir(), `conductor-ipc-test-${process.pid}`);
 process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE = TEST_DATA_DIR;
 
-const { writeIpcEvent, drainEventFiles, sessionEventsDir, watchIpcEvents } = await import("../../src/core/ipc.js");
+const { writeIpcEvent, drainEventFiles, sessionEventsDir, watchIpcEvents } = await import("../../src/ipc.js");
 
 afterAll(() => {
   process.env.CONDUCTOR_DATA_DIR_TEST_OVERRIDE = undefined;

@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { injectHooks } from "../../../src/core/session.js";
+import { injectHooks } from "../../../src/session/manager.js";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 

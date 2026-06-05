@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConductorConfig } from "../../../src/config.js";
-import type { HiveSessionRecord } from "../../../src/core/hive-client.js";
-import { hashPlugin } from "../../../src/plugins/loader.js";
+import type { HiveSessionRecord } from "../../../src/hive/cli.js";
+import { hashPlugin } from "../../../src/plugin/trust.js";
 
 // ── Port allocation ───────────────────────────────────────────────────────────
 

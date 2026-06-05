@@ -8,7 +8,7 @@ import {
   hashPlugin,
   persistTrustedPlugins,
   promptTrustApproval,
-} from "../../src/plugins/loader.js";
+} from "../../src/plugin/trust.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

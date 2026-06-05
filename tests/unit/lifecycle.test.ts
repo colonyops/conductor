@@ -1,4 +1,4 @@
-import { transition } from "../../src/core/lifecycle.js";
+import { transition } from "../../src/session/lifecycle.js";
 import type { Session } from "../../src/types.js";
 
 function makeSession(state: Session["state"]): Session {

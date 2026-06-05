@@ -1,80 +1,18 @@
-import { createInterface } from "node:readline";
-import { type ConductorConfig, resolvePath, writeConfig } from "../config.js";
-import type { EventBus } from "../core/events.js";
-import type { SessionManager } from "../core/session.js";
-import { createHiveClient } from "../sdk/hive.js";
-import type { HiveClient } from "../sdk/hive.js";
+import { type ConductorConfig, resolvePath } from "../config.js";
+import { createHiveClient } from "../sdk/client.js";
+import type { HiveClient } from "../sdk/client.js";
 import { createHttpClient } from "../sdk/http.js";
 import type { KVStore } from "../sdk/kv.js";
 import type { openKVDatabase } from "../sdk/kv.js";
 import type { Logger } from "../sdk/logger.js";
 import { createScheduler } from "../sdk/scheduler.js";
 import type { SecretsClient } from "../sdk/secrets.js";
+import type { EventBus } from "../session/events.js";
+import type { SessionManager } from "../session/manager.js";
 import type { Plugin, PluginMeta } from "../types.js";
+import { type TrustStatus, checkTrust, hashPlugin, persistTrustedPlugins, promptTrustApproval } from "./trust.js";
 
 const INIT_TIMEOUT_MS = 30_000;
-
-// ── Trust model ───────────────────────────────────────────────────────────────
-
-export async function hashPlugin(filePath: string): Promise<string> {
-  const content = await Bun.file(resolvePath(filePath)).arrayBuffer();
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(new Uint8Array(content));
-  return `sha256:${hasher.digest("hex")}`;
-}
-
-export function getStoredHash(config: ConductorConfig, pluginId: string): string | undefined {
-  return config.trustedPlugins[pluginId];
-}
-
-export type TrustStatus = "trusted" | "changed" | "unknown";
-
-export function checkTrust(pluginId: string, currentHash: string, config: ConductorConfig): TrustStatus {
-  const stored = config.trustedPlugins[pluginId];
-  if (!stored) return "unknown";
-  return stored === currentHash ? "trusted" : "changed";
-}
-
-export async function promptTrustApproval(
-  pluginMeta: { name: string; id: string; path: string; hash: string },
-  reason: "new" | "changed",
-  readLineFn?: (question: string) => Promise<string>,
-): Promise<boolean> {
-  const reasonText = reason === "new" ? "New plugin" : "Plugin file changed";
-  const msg = `\n${reasonText}: ${pluginMeta.name}\n  ID:   ${pluginMeta.id}\n  Path: ${pluginMeta.path}\n  Hash: ${pluginMeta.hash}\n\nAllow this plugin? [y/N]: `;
-
-  let answer: string;
-  if (readLineFn) {
-    answer = await readLineFn(msg);
-  } else {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    answer = await new Promise<string>((resolve) => {
-      rl.question(msg, (ans) => {
-        rl.close();
-        resolve(ans.trim().toLowerCase());
-      });
-    });
-  }
-  return answer === "y" || answer === "yes";
-}
-
-export async function persistTrustedPlugins(
-  approvals: Array<{ pluginId: string; hash: string }>,
-  config: ConductorConfig,
-  configPath: string,
-): Promise<void> {
-  const updated: ConductorConfig = {
-    ...config,
-    trustedPlugins: { ...config.trustedPlugins },
-  };
-  for (const { pluginId, hash } of approvals) {
-    updated.trustedPlugins[pluginId] = hash;
-  }
-  await writeConfig(updated, configPath);
-}
 
 // ── Plugin registration ───────────────────────────────────────────────────────
 
@@ -297,7 +235,7 @@ export async function loadPlugins(opts: {
 
     let builtinModule: { default: Plugin };
     try {
-      builtinModule = (await import("./github-issues.js")) as {
+      builtinModule = (await import("./builtin/github-issues.js")) as {
         default: Plugin;
       };
     } catch (err) {
@@ -363,3 +301,5 @@ export async function unloadPlugins(registrations: PluginRegistration[]): Promis
     }
   }
 }
+
+export type { TrustStatus };

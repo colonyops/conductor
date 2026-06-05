@@ -1,16 +1,16 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
-import { EventBus } from "./core/events.js";
-import { CONDUCTOR_DATA_DIR, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
-import { createMetrics, startMetricsServer } from "./core/observability.js";
-import { SessionManager } from "./core/session.js";
-import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
-import type { PluginRegistration } from "./plugins/loader.js";
+import { CONDUCTOR_DATA_DIR, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./ipc.js";
+import { createMetrics, startMetricsServer } from "./observability/metrics.js";
+import { loadPlugins, unloadPlugins } from "./plugin/loader.js";
+import type { PluginRegistration } from "./plugin/loader.js";
 import { createConcurrencyLimiter } from "./sdk/concurrency.js";
 import { openKVDatabase } from "./sdk/kv.js";
 import { createLogger } from "./sdk/logger.js";
 import { createSecretsClient } from "./sdk/secrets.js";
+import { EventBus } from "./session/events.js";
+import { SessionManager } from "./session/manager.js";
 import type { IpcSignal, SessionEvent } from "./types.js";
 
 const PLUGIN_DOCS = `

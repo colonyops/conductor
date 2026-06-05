@@ -1,4 +1,4 @@
-import type { HiveClient } from "./sdk/hive.js";
+import type { HiveClient } from "./sdk/client.js";
 import type { HttpClient } from "./sdk/http.js";
 import type { KVStore } from "./sdk/kv.js";
 import type { Logger } from "./sdk/logger.js";

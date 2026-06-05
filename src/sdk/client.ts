@@ -1,5 +1,5 @@
-import type { EventBus } from "../core/events.js";
-import type { SessionManager } from "../core/session.js";
+import type { EventBus } from "../session/events.js";
+import type { SessionManager } from "../session/manager.js";
 import type { CoreEventName, CoreEventPayload, Session } from "../types.js";
 
 export interface NewSessionOptions {
