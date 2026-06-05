@@ -81,7 +81,7 @@ export function createScheduler(logger: Logger): Scheduler {
 
   function schedule(times: string[], fn: () => Promise<void>): SchedulerHandle {
     let cancelled = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
+    const timers = new Set<ReturnType<typeof setTimeout>>();
 
     function scheduleNext(hhmm: string): void {
       if (cancelled) return;
@@ -96,6 +96,7 @@ export function createScheduler(logger: Logger): Scheduler {
         return;
       }
       const timer = setTimeout(async () => {
+        timers.delete(timer);
         if (cancelled) return;
         try {
           await fn();
@@ -107,7 +108,7 @@ export function createScheduler(logger: Logger): Scheduler {
         }
         scheduleNext(hhmm);
       }, ms);
-      timers.push(timer);
+      timers.add(timer);
     }
 
     for (const time of times) {
