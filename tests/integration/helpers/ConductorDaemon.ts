@@ -29,7 +29,9 @@ export class ConductorDaemon {
       const text = await Bun.file(logPath)
         .text()
         .catch(() => "");
-      if (text.includes('"Conductor started"')) return;
+      // Match the bare message so this works for both `json` (`"msg":"Conductor started"`)
+      // and `logfmt` (`msg="Conductor started"` / `msg=Conductor started`) log formats.
+      if (text.includes("Conductor started")) return;
       await new Promise((r) => setTimeout(r, 100));
     }
     throw new Error(`Conductor did not start within ${timeoutMs}ms. Check log: ${logPath}`);
