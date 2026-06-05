@@ -1,4 +1,5 @@
-import { issueSlug } from "../../src/plugins/github-issues.js";
+import githubIssuesPlugin, { issueSlug } from "../../src/plugins/github-issues.js";
+import type { PluginContext, Session } from "../../src/types.js";
 
 describe("issueSlug", () => {
   it("produces gh-{number}-{slug} format", () => {
@@ -38,5 +39,159 @@ describe("issueSlug", () => {
   it("produces only lowercase alphanumeric and hyphens", () => {
     const result = issueSlug(42, "feat: [v2] adopt @scope/pkg & update deps!");
     expect(result).toMatch(/^[a-z0-9-]+$/);
+  });
+});
+
+// ── Polling / lifecycle ─────────────────────────────────────────────────────
+
+interface FakeIssue {
+  id: number;
+  number: number;
+  title: string;
+}
+
+function makeContext(issues: FakeIssue[]) {
+  const store = new Map<string, unknown>();
+  const kv = {
+    async get<T>(key: string): Promise<T | undefined> {
+      return store.has(key) ? (store.get(key) as T) : undefined;
+    },
+    async set<T>(key: string, value: T): Promise<void> {
+      store.set(key, value);
+    },
+    async has(key: string): Promise<boolean> {
+      return store.has(key);
+    },
+    async delete(key: string): Promise<void> {
+      store.delete(key);
+    },
+    async keys(prefix?: string): Promise<string[]> {
+      const all = [...store.keys()];
+      return prefix ? all.filter((k) => k.startsWith(prefix)) : all;
+    },
+    async clear(): Promise<void> {
+      store.clear();
+    },
+  };
+
+  const created: Session[] = [];
+  let pollFn: (() => Promise<void>) | undefined;
+  let completeHandler: ((payload: { session: Session }) => Promise<void>) | undefined;
+
+  const hive = {
+    async newSession(opts: { name: string }): Promise<Session> {
+      const session = { id: `sess-${created.length + 1}`, name: opts.name, pluginId: "x" } as unknown as Session;
+      created.push(session);
+      return session;
+    },
+    listSessions(): Session[] {
+      return [];
+    },
+    onSessionComplete(handler: (payload: { session: Session }) => Promise<void>): () => void {
+      completeHandler = handler;
+      return () => {};
+    },
+  };
+
+  const scheduler = {
+    interval(_ms: number, fn: () => Promise<void>) {
+      pollFn = fn;
+      return { cancel() {} };
+    },
+  };
+
+  const logger = {
+    info() {},
+    warn() {},
+    error() {},
+    debug() {},
+  };
+
+  const secrets = {
+    async get(): Promise<string> {
+      return "fake-token";
+    },
+  };
+
+  const ctx = { kv, hive, scheduler, logger, secrets, http: {} } as unknown as PluginContext;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify(issues), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as unknown as typeof fetch;
+
+  return {
+    ctx,
+    store,
+    created,
+    runPoll: () => pollFn?.() ?? Promise.resolve(),
+    complete: (session: Session) => completeHandler?.({ session }) ?? Promise.resolve(),
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+describe("github-issues lifecycle", () => {
+  const ENV_KEYS = ["CONDUCTOR_GITHUB_REPO", "CONDUCTOR_GITHUB_LABELS", "CONDUCTOR_GITHUB_TOKEN_SOURCE"];
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) saved[k] = process.env[k];
+    process.env.CONDUCTOR_GITHUB_REPO = "acme/widgets";
+    process.env.CONDUCTOR_GITHUB_LABELS = "agent";
+    process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = "secret";
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k] as string;
+    }
+  });
+
+  it("spawns one session per new issue", async () => {
+    const h = makeContext([{ id: 100, number: 7, title: "fix the thing" }]);
+    try {
+      await githubIssuesPlugin.init(h.ctx);
+      await h.runPoll();
+      expect(h.created).toHaveLength(1);
+      expect(h.store.has("seen:100")).toBe(true);
+    } finally {
+      h.restore();
+    }
+  });
+
+  it("does not re-spawn a session for a completed but still-open issue", async () => {
+    const issue = { id: 100, number: 7, title: "fix the thing" };
+    const h = makeContext([issue]);
+    try {
+      await githubIssuesPlugin.init(h.ctx);
+
+      // First poll spawns a session.
+      await h.runPoll();
+      expect(h.created).toHaveLength(1);
+
+      // Session completes; issue remains open (PR review pending).
+      const session = h.created[0];
+      if (!session) throw new Error("expected a session to have been created");
+      await h.complete(session);
+
+      // The seen marker must survive completion and be stamped completed.
+      expect(h.store.has("seen:100")).toBe(true);
+      const seen = h.store.get("seen:100") as { completedAt?: string };
+      expect(seen.completedAt).toBeTruthy();
+      // The session-scoped entry is removed.
+      expect(h.store.has("session:sess-1")).toBe(false);
+
+      // Subsequent polls must NOT spawn a duplicate session.
+      await h.runPoll();
+      await h.runPoll();
+      expect(h.created).toHaveLength(1);
+    } finally {
+      h.restore();
+    }
   });
 });
