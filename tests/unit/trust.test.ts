@@ -28,6 +28,8 @@ function makeConfig(trusted: Record<string, string> = {}): ConductorConfig {
       logPath: "~/.local/dotlogs/conductor.log",
       logMaxBytes: 10_485_760,
       logMaxBackups: 5,
+      logFormat: "json",
+      logCaller: false,
     },
     idleTimeoutMs: 600_000,
     builtins: {},

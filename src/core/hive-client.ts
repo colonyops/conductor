@@ -39,7 +39,9 @@ function extractJSON(raw: string): string {
   // Strip ANSI escape codes, then find the last top-level JSON object
   // (hook output precedes it on stdout).
   const clean = raw
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ANSI escape stripping
     .replace(/\x1b\[[0-9;]*[mGKHF]/g, "")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ANSI escape stripping
     .replace(/\x1b\][^\x07]*\x07/g, "");
   const idx = clean.lastIndexOf("\n{");
   if (idx !== -1) return clean.slice(idx + 1);
