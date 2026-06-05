@@ -4,10 +4,7 @@ import { injectHooks } from "../../../src/core/session.js";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const SESSION_CREATOR = join(
-  import.meta.dir,
-  "../fixtures/plugins/session-creator.plugin.ts",
-);
+const SESSION_CREATOR = join(import.meta.dir, "../fixtures/plugins/session-creator.plugin.ts");
 
 describe("14 — hook injection merge", () => {
   let env: TestEnv;
@@ -33,7 +30,7 @@ describe("14 — hook injection merge", () => {
     if (!session) return;
 
     const workDir = env.workDir(session);
-    const settingsPath = `${workDir}/.claude/settings.json`;
+    const settingsPath = `${workDir}/.claude/settings.local.json`;
 
     // Overwrite settings with pre-existing content
     const existing = {

@@ -2,10 +2,7 @@ import { join } from "node:path";
 import { ConductorDaemon } from "../helpers/ConductorDaemon.js";
 import { TestEnv } from "../helpers/TestEnv.js";
 
-const SESSION_CREATOR = join(
-  import.meta.dir,
-  "../fixtures/plugins/session-creator.plugin.ts",
-);
+const SESSION_CREATOR = join(import.meta.dir, "../fixtures/plugins/session-creator.plugin.ts");
 
 describe("07 — hook injection", () => {
   let env: TestEnv;
@@ -24,14 +21,14 @@ describe("07 — hook injection", () => {
     await env.teardown();
   });
 
-  it("injects Stop and PostToolUse hooks into .claude/settings.json", async () => {
+  it("injects Stop and PostToolUse hooks into .claude/settings.local.json", async () => {
     const sessions = await env.hiveSessionList();
     const session = sessions[0];
     expect(session).toBeDefined();
     if (!session) return;
 
     const workDir = env.workDir(session);
-    const settingsPath = `${workDir}/.claude/settings.json`;
+    const settingsPath = `${workDir}/.claude/settings.local.json`;
 
     const text = await Bun.file(settingsPath).text();
     const settings = JSON.parse(text) as {
@@ -49,7 +46,7 @@ describe("07 — hook injection", () => {
     if (!session) return;
 
     const workDir = env.workDir(session);
-    const text = await Bun.file(`${workDir}/.claude/settings.json`).text();
+    const text = await Bun.file(`${workDir}/.claude/settings.local.json`).text();
     const settings = JSON.parse(text) as {
       hooks: {
         Stop: Array<{ hooks: Array<{ command: string }> }>;
@@ -67,7 +64,7 @@ describe("07 — hook injection", () => {
     if (!session) return;
 
     const workDir = env.workDir(session);
-    const text = await Bun.file(`${workDir}/.claude/settings.json`).text();
+    const text = await Bun.file(`${workDir}/.claude/settings.local.json`).text();
     const settings = JSON.parse(text) as {
       hooks: {
         PostToolUse: Array<{ hooks: Array<{ command: string }> }>;

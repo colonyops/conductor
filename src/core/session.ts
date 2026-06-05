@@ -10,11 +10,9 @@ import { type TransitionOpts, transition } from "./lifecycle.js";
 
 // ── Hook injection helpers ────────────────────────────────────────────────────
 
-export async function injectHooks(
-  workDir: string,
-  sessionId: string,
-): Promise<void> {
-  const settingsPath = `${workDir}/.claude/settings.json`;
+export async function injectHooks(workDir: string, sessionId: string): Promise<void> {
+  const claudeDir = `${workDir}/.claude`;
+  const settingsPath = `${claudeDir}/settings.local.json`;
   let existing: Record<string, unknown> = {};
   try {
     existing = JSON.parse(await Bun.file(settingsPath).text());
@@ -59,8 +57,21 @@ export async function injectHooks(
     ],
   };
 
-  mkdirSync(`${workDir}/.claude`, { recursive: true });
+  mkdirSync(claudeDir, { recursive: true });
   await Bun.write(settingsPath, `${JSON.stringify(existing, null, 2)}\n`);
+
+  // Exclude from git to prevent agents from accidentally committing it.
+  // .git/info/exclude works like .gitignore but is never tracked.
+  const gitExcludePath = `${workDir}/.git/info/exclude`;
+  const excludeEntry = ".claude/settings.local.json";
+  try {
+    const current = await Bun.file(gitExcludePath).text();
+    if (!current.includes(excludeEntry)) {
+      await Bun.write(gitExcludePath, `${current.trimEnd()}\n${excludeEntry}\n`);
+    }
+  } catch {
+    // Not a git repo or .git/info/exclude doesn't exist — skip
+  }
 }
 
 export async function injectPrePrompt(workDir: string, template: string): Promise<void> {
@@ -144,15 +155,9 @@ export class SessionManager {
   async createSession(opts: CreateSessionOptions): Promise<Session> {
     const release = await this.globalLimiter.acquire();
     try {
-      const preTemplate =
-        opts.prePromptOverride ?? this.config.prePromptTemplate;
-      const postTemplate =
-        opts.postPromptOverride ?? this.config.postPromptTemplate;
-      const prompt = buildPromptWithTemplates(
-        opts.context,
-        preTemplate,
-        postTemplate,
-      );
+      const preTemplate = opts.prePromptOverride ?? this.config.prePromptTemplate;
+      const postTemplate = opts.postPromptOverride ?? this.config.postPromptTemplate;
+      const prompt = buildPromptWithTemplates(opts.context, preTemplate, postTemplate);
 
       const { id, workDir, existed } = await hiveNew({
         name: opts.name,
@@ -172,14 +177,7 @@ export class SessionManager {
         }
       }
 
-
-      const session = buildSession(
-        id,
-        opts.name,
-        opts.pluginId,
-        workDir,
-        false,
-      );
+      const session = buildSession(id, opts.name, opts.pluginId, workDir, false);
       this.sessions.set(id, session);
 
       await this.eventBus.emit("sessionCreated", { session });
@@ -206,8 +204,7 @@ export class SessionManager {
     if (!session) return;
 
     const idleTimeoutMs =
-      this.config.plugins.find((p) => p.path === session.pluginId)
-        ?.idleTimeoutMs ?? this.config.idleTimeoutMs;
+      this.config.plugins.find((p) => p.path === session.pluginId)?.idleTimeoutMs ?? this.config.idleTimeoutMs;
 
     const transitionOpts: Parameters<typeof transition>[2] = { idleTimeoutMs };
     if (opts.isApprovalPending !== undefined) {
