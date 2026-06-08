@@ -52,10 +52,16 @@ async function keychainGet(key: string): Promise<string | undefined> {
 async function keychainSet(key: string, value: string): Promise<void> {
   try {
     if (process.platform === "darwin") {
-      const proc = Bun.spawn(["security", "add-generic-password", "-U", "-s", "conductor", "-a", key, "-w", value], {
+      // Pass the secret via stdin, not as a CLI arg: `-w` with no value makes
+      // `security` read the password from stdin (prompting for it twice), so the
+      // secret never appears in the process argument list visible to `ps`.
+      const proc = Bun.spawn(["security", "add-generic-password", "-U", "-s", "conductor", "-a", key, "-w"], {
+        stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
       });
+      proc.stdin.write(`${value}\n${value}\n`);
+      proc.stdin.end();
       await proc.exited;
       return;
     }
