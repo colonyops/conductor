@@ -4,7 +4,7 @@ import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
 import type { Logger } from "../sdk/logger.js";
 import type { Session, SessionEvent, SessionState } from "../types.js";
 import type { EventBus } from "./events.js";
-import { hiveNew, hiveRecycle } from "./hive-client.js";
+import { acceptTrustPrompt, hiveNew, hiveRecycle } from "./hive-client.js";
 import { sessionEventsDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
 
@@ -203,13 +203,14 @@ export class SessionManager {
         ...(prompt !== undefined ? { prompt } : {}),
         ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
         tags: ["conductor"],
-        ...(this.logger !== undefined ? { logger: this.logger } : {}),
       });
 
       // Ensure events dir exists
       mkdirSync(sessionEventsDir(id), { recursive: true });
 
       if (!existed) {
+        await this.acceptTrustOrRecycle(id, workDir, opts);
+
         await injectHooks(workDir, id);
 
         if (preTemplate) {
@@ -224,6 +225,37 @@ export class SessionManager {
       return session;
     } finally {
       release();
+    }
+  }
+
+  // Accepts Claude Code's first-run trust dialog for a freshly created session.
+  // If the prompt cannot be cleared the session would hang on the dialog
+  // forever, emitting no signals while looking healthy. In that case we emit
+  // sessionError for observability, recycle the orphaned hive session so a
+  // retry starts from a clean pane, and rethrow so the caller can back off.
+  private async acceptTrustOrRecycle(id: string, workDir: string, opts: CreateSessionOptions): Promise<void> {
+    try {
+      await acceptTrustPrompt(opts.name, workDir, this.logger ? { logger: this.logger } : {});
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      await this.eventBus.emit("sessionError", {
+        session: buildSession(id, opts.name, opts.pluginId, workDir, false),
+        error,
+      });
+      try {
+        await hiveRecycle(id);
+      } catch (recycleErr) {
+        this.logger?.warn("failed to recycle session after trust failure", {
+          sessionId: id,
+          error: recycleErr instanceof Error ? recycleErr.message : String(recycleErr),
+        });
+      }
+      try {
+        rmSync(sessionEventsDir(id), { recursive: true, force: true });
+      } catch {
+        // best-effort — ignore unexpected errors
+      }
+      throw error;
     }
   }
 

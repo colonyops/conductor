@@ -19,7 +19,6 @@ export interface HiveNewSessionArgs {
   prompt?: string;
   agent?: string;
   tags?: string[];
-  logger?: Logger;
 }
 
 interface HiveBatchResult {
@@ -134,8 +133,6 @@ export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; w
       throw new Error(`hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`);
     }
 
-    await acceptTrustPrompt(result.name, result.path, args.logger ? { logger: args.logger } : {});
-
     return { id: result.session_id, workDir: result.path, existed: false };
   } finally {
     release();
@@ -150,6 +147,15 @@ function encodeProjectPath(absPath: string): string {
 
 // Matches Claude Code's "Do you trust the files in this folder?" trust dialog.
 const TRUST_PROMPT_PATTERN = /do you trust the files|trust the files in this folder/i;
+
+// hasTrustPrompt tests pane content for the trust dialog. `tmux capture-pane`
+// hard-wraps at pane width, so the dialog text can be split across lines
+// mid-phrase (e.g. "Do you trust the\nfiles in this folder?"). Collapsing all
+// whitespace to single spaces before matching keeps the regex working when the
+// prompt wraps.
+function hasTrustPrompt(content: string): boolean {
+  return TRUST_PROMPT_PATTERN.test(content.replace(/\s+/g, " "));
+}
 
 // External operations acceptTrustPrompt depends on, injectable for testing.
 export interface AcceptTrustDeps {
@@ -187,41 +193,88 @@ const defaultTrustDeps: AcceptTrustDeps = {
 export interface AcceptTrustOptions {
   pollIntervalMs?: number;
   timeoutMs?: number;
+  /** How long to verify no prompt appears when the folder is already trusted. */
+  trustedVerifyMs?: number;
+  /** How many times to send Enter and re-check before giving up on a prompt. */
+  maxKeyAttempts?: number;
   logger?: Logger;
   deps?: AcceptTrustDeps;
 }
 
+// dismissTrustPrompt sends Enter to accept a detected trust dialog and
+// re-captures the pane to confirm it actually cleared, retrying the keystroke a
+// bounded number of times. A zero exit from `tmux send-keys` only means tmux
+// accepted the keystroke — not that the dialog was dismissed (wrong default
+// highlight, focus elsewhere, a follow-up confirmation) — so we verify the
+// prompt is gone rather than trusting the send. Throws if it never clears.
+async function dismissTrustPrompt(
+  target: string,
+  sessionName: string,
+  deps: AcceptTrustDeps,
+  maxKeyAttempts: number,
+  pollIntervalMs: number,
+  logger: Logger | undefined,
+): Promise<void> {
+  for (let attempt = 0; attempt < maxKeyAttempts; attempt++) {
+    const sent = await deps.sendKeys(target, ["Enter"]);
+    if (!sent) {
+      logger?.warn("trust prompt detected but tmux send-keys failed", { session: sessionName, target, attempt });
+    }
+
+    await deps.sleep(pollIntervalMs);
+
+    const { ok, content } = await deps.capturePane(target);
+    if (ok && !hasTrustPrompt(content)) {
+      logger?.debug("accepted trust prompt", { session: sessionName, target, attempt });
+      return;
+    }
+  }
+
+  throw new Error(
+    `trust prompt for session "${sessionName}" (target ${target}) still present after ${maxKeyAttempts} send-keys attempts`,
+  );
+}
+
 // acceptTrustPrompt accepts Claude Code's first-run trust dialog for a freshly
 // created session. It polls the tmux pane until the prompt is rendered rather
-// than guessing a fixed delay, checks the send-keys exit code, and logs a
-// warning when the prompt never appears or the keystroke cannot be delivered.
+// than guessing a fixed delay, confirms the dialog actually cleared after
+// sending Enter, and throws when the session is left blocked on the dialog so
+// the caller can surface it instead of treating a stuck session as healthy.
+//
+// `alreadyTrusted` is treated as a hint, not a guarantee: it is keyed on the
+// project dir existing under ~/.claude/projects, which can be a false positive
+// (path reuse after recycle, or a dir created for another reason). When the
+// hint says trusted we still verify the pane shows no prompt — over a short
+// window rather than the full timeout — and dismiss one if it appears anyway.
 export async function acceptTrustPrompt(
   sessionName: string,
   workDir: string,
   options: AcceptTrustOptions = {},
 ): Promise<void> {
-  const { pollIntervalMs = 250, timeoutMs = 15_000, logger, deps = defaultTrustDeps } = options;
+  const {
+    pollIntervalMs = 250,
+    timeoutMs = 30_000,
+    trustedVerifyMs = 2_000,
+    maxKeyAttempts = 5,
+    logger,
+    deps = defaultTrustDeps,
+  } = options;
 
-  if (deps.alreadyTrusted(workDir)) {
-    // Directory already trusted from a prior session — no prompt will appear.
-    return;
-  }
-
+  const trusted = deps.alreadyTrusted(workDir);
+  // When the folder is already trusted no prompt is expected, so only spend a
+  // brief window confirming none appears. Otherwise wait the full timeout for
+  // the prompt to render (slow startup, large repo indexing, cold cache).
+  const windowMs = trusted ? Math.min(timeoutMs, trustedVerifyMs) : timeoutMs;
   const target = `${sessionName}:claude`;
-  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+  const maxAttempts = Math.max(1, Math.ceil(windowMs / pollIntervalMs));
   let paneAccessible = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const { ok, content } = await deps.capturePane(target);
     paneAccessible = paneAccessible || ok;
 
-    if (ok && TRUST_PROMPT_PATTERN.test(content)) {
-      const sent = await deps.sendKeys(target, ["Enter"]);
-      if (sent) {
-        logger?.debug("accepted trust prompt", { session: sessionName, target, attempt });
-      } else {
-        logger?.warn("trust prompt detected but tmux send-keys failed", { session: sessionName, target });
-      }
+    if (ok && hasTrustPrompt(content)) {
+      await dismissTrustPrompt(target, sessionName, deps, maxKeyAttempts, pollIntervalMs, logger);
       return;
     }
 
@@ -230,12 +283,23 @@ export async function acceptTrustPrompt(
     }
   }
 
-  logger?.warn("trust prompt not detected before timeout; session may be blocked on the trust dialog", {
-    session: sessionName,
-    target,
-    timeoutMs,
-    paneAccessible,
-  });
+  if (trusted) {
+    // No prompt within the verification window and the folder was already
+    // trusted — the expected, healthy case.
+    logger?.debug("no trust prompt within verification window; folder already trusted", {
+      session: sessionName,
+      target,
+    });
+    return;
+  }
+
+  // The folder is not known-trusted and no prompt ever appeared. Either it
+  // never rendered or it rendered after the window closed, leaving the session
+  // blocked on the dialog. Surface it so the session is not treated as healthy.
+  throw new Error(
+    `trust prompt not detected within ${timeoutMs}ms for session "${sessionName}" (target ${target}, ` +
+      `paneAccessible=${paneAccessible}); session may be blocked on the trust dialog`,
+  );
 }
 
 export async function hiveRecycle(sessionId: string): Promise<void> {
