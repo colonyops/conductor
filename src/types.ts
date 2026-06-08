@@ -1,3 +1,4 @@
+import type { PluginMetrics } from "./core/observability.js";
 import type { HiveClient } from "./sdk/hive.js";
 import type { HttpClient } from "./sdk/http.js";
 import type { KVStore } from "./sdk/kv.js";
@@ -55,6 +56,7 @@ export interface PluginContext {
   scheduler: Scheduler;
   logger: Logger;
   http: HttpClient;
+  metrics: PluginMetrics;
 }
 
 // ── IPC Events ───────────────────────────────────────────────────────────────

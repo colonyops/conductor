@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { type ConductorConfig, resolvePath, writeConfig } from "../config.js";
 import type { EventBus } from "../core/events.js";
+import type { PluginMetricsFactory } from "../core/observability.js";
 import type { SessionManager } from "../core/session.js";
 import { createHiveClient } from "../sdk/hive.js";
 import type { HiveClient } from "../sdk/hive.js";
@@ -134,11 +135,13 @@ export async function loadPlugins(opts: {
   sessionManager: SessionManager;
   eventBus: EventBus;
   kvDatabase: ReturnType<typeof openKVDatabase>;
+  pluginMetrics: PluginMetricsFactory;
   secrets: SecretsClient;
   globalLogger: Logger;
   readLineFn?: (question: string) => Promise<string>;
 }): Promise<PluginRegistration[]> {
-  const { config, configPath, sessionManager, eventBus, kvDatabase, secrets, globalLogger, readLineFn } = opts;
+  const { config, configPath, sessionManager, eventBus, kvDatabase, pluginMetrics, secrets, globalLogger, readLineFn } =
+    opts;
 
   const registrations: PluginRegistration[] = [];
   const approvals: Array<{ trustKey: string; hash: string }> = [];
@@ -245,7 +248,8 @@ export async function loadPlugins(opts: {
     const hive = makeTrackingHiveClient(baseHive, unsubscribes);
 
     const http = createHttpClient(pluginLogger);
-    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http };
+    const metrics = pluginMetrics.forPlugin(plugin.id);
+    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics };
 
     try {
       await Promise.race([
@@ -265,6 +269,7 @@ export async function loadPlugins(opts: {
         });
       }
       scheduler.cancelAll();
+      pluginMetrics.removePlugin(plugin.id);
       continue;
     }
 
@@ -275,6 +280,7 @@ export async function loadPlugins(opts: {
       teardown() {
         scheduler.cancelAll();
         for (const unsub of unsubscribes) unsub();
+        pluginMetrics.removePlugin(plugin.id);
       },
     });
 
@@ -309,7 +315,8 @@ export async function loadPlugins(opts: {
     });
     const hive = makeTrackingHiveClient(baseHive, unsubscribes);
     const http = createHttpClient(pluginLogger);
-    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http };
+    const metrics = pluginMetrics.forPlugin(plugin.id);
+    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics };
 
     try {
       await Promise.race([
@@ -322,6 +329,7 @@ export async function loadPlugins(opts: {
       const msg = err instanceof Error ? err.message : String(err);
       globalLogger.error("Builtin github-issues init failed", { error: msg });
       scheduler.cancelAll();
+      pluginMetrics.removePlugin(plugin.id);
       return registrations;
     }
 
@@ -332,6 +340,7 @@ export async function loadPlugins(opts: {
       teardown() {
         scheduler.cancelAll();
         for (const unsub of unsubscribes) unsub();
+        pluginMetrics.removePlugin(plugin.id);
       },
     });
 

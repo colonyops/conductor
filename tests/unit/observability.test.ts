@@ -16,6 +16,21 @@ describe("createMetrics", () => {
     expect(metrics.secretsResolutionTotal).toBeDefined();
   });
 
+  it("returns a working pluginMetrics factory", () => {
+    const { pluginMetrics } = createMetrics();
+    expect(pluginMetrics).toBeDefined();
+    expect(typeof pluginMetrics.forPlugin).toBe("function");
+    expect(typeof pluginMetrics.removePlugin).toBe("function");
+  });
+
+  it("renders plugin-registered metrics on the shared registry", async () => {
+    const { registry, pluginMetrics } = createMetrics();
+    pluginMetrics.forPlugin("acme.bot").counter({ name: "widgets_total", help: "Widgets" }).inc();
+
+    const text = await registry.metrics();
+    expect(text).toContain("conductor_plugin_acme_bot_widgets_total 1");
+  });
+
   it("counter inc accumulates correctly", async () => {
     const { registry, metrics } = createMetrics();
     metrics.sessionsTotal.inc({ state: "ACTIVE", plugin_id: "test" });

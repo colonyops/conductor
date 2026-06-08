@@ -150,7 +150,37 @@ function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][], opts: { failNew
     },
   };
 
-  const ctx = { kv, hive, scheduler, logger, secrets, http: {} } as unknown as PluginContext;
+  // Records every metric interaction keyed by the un-prefixed metric name so
+  // tests can assert the plugin increments the right counters.
+  const metricEvents: Record<string, Array<{ op: string; labels?: unknown; value?: unknown }>> = {};
+  function recordMetric(name: string) {
+    metricEvents[name] ??= [];
+    const log = metricEvents[name];
+    return {
+      inc(labels?: unknown) {
+        log.push({ op: "inc", labels });
+      },
+      observe(value?: unknown) {
+        log.push({ op: "observe", value });
+      },
+      set(value?: unknown) {
+        log.push({ op: "set", value });
+      },
+      startTimer() {
+        return () => log.push({ op: "timer" });
+      },
+      labels() {
+        return this;
+      },
+    };
+  }
+  const metrics = {
+    counter: (o: { name: string }) => recordMetric(o.name),
+    gauge: (o: { name: string }) => recordMetric(o.name),
+    histogram: (o: { name: string }) => recordMetric(o.name),
+  };
+
+  const ctx = { kv, hive, scheduler, logger, secrets, http: {}, metrics } as unknown as PluginContext;
 
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
@@ -174,6 +204,7 @@ function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][], opts: { failNew
     ctx,
     store,
     created,
+    metricEvents,
     fetchCalls: () => fetchCalls,
     runPoll: () => pollFn?.() ?? Promise.resolve(),
     complete: (session: Session) => completeHandler?.({ session }) ?? Promise.resolve(),
@@ -235,6 +266,38 @@ describe("github-issues lifecycle", () => {
       // not permanently orphaned by a transient failure.
       expect(failing.created).toHaveLength(0);
       expect(failing.store.has("seen:100")).toBe(false);
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("increments poll, issues-seen, and sessions-created metrics on a successful poll", async () => {
+    const h = makeContext([{ id: 100, number: 7, title: "fix the thing" }]);
+    try {
+      await createGitHubIssuesPlugin(baseConfig).init(h.ctx);
+      await h.runPoll();
+
+      expect(h.metricEvents.polls_total).toContainEqual({ op: "inc", labels: { result: "ok" } });
+      expect(h.metricEvents.issues_seen_total).toHaveLength(1);
+      expect(h.metricEvents.sessions_created_total).toContainEqual({ op: "inc", labels: { result: "ok" } });
+      // poll_duration_ms histogram timer started and stopped exactly once.
+      expect(h.metricEvents.poll_duration_ms).toContainEqual({ op: "timer" });
+      // open_sessions gauge set from listSessions (empty fake → 0).
+      expect(h.metricEvents.open_sessions).toContainEqual({ op: "set", value: 0 });
+    } finally {
+      h.restore();
+    }
+  });
+
+  it("increments sessions-created error metric when newSession fails", async () => {
+    const failing = makeContext([{ id: 100, number: 7, title: "fix the thing" }], { failNewSession: true });
+    try {
+      await createGitHubIssuesPlugin(baseConfig).init(failing.ctx);
+      await failing.runPoll();
+
+      expect(failing.metricEvents.sessions_created_total).toContainEqual({ op: "inc", labels: { result: "error" } });
+      // The poll itself still completes successfully.
+      expect(failing.metricEvents.polls_total).toContainEqual({ op: "inc", labels: { result: "ok" } });
     } finally {
       failing.restore();
     }

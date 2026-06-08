@@ -1,5 +1,138 @@
 import { Counter, Gauge, Histogram, Registry } from "prom-client";
 
+// ── Plugin metrics ─────────────────────────────────────────────────────────────
+
+/** Fixed prefix prepended to every plugin-registered metric name. */
+const PLUGIN_METRIC_PREFIX = "conductor_plugin_";
+
+export interface PluginMetricOptions {
+  /** Namespaced automatically; do NOT include the conductor_plugin_ prefix. */
+  name: string;
+  help: string;
+  /** Plugin-defined dimensions; the name prefix handles cross-plugin isolation. */
+  labelNames?: string[];
+}
+
+export interface PluginHistogramOptions extends PluginMetricOptions {
+  buckets?: number[];
+}
+
+export interface PluginMetrics {
+  counter(opts: PluginMetricOptions): Counter<string>;
+  gauge(opts: PluginMetricOptions): Gauge<string>;
+  histogram(opts: PluginHistogramOptions): Histogram<string>;
+}
+
+export interface PluginMetricsFactory {
+  forPlugin(pluginId: string): PluginMetrics;
+  removePlugin(pluginId: string): void;
+}
+
+/**
+ * Normalize an arbitrary string to a valid Prometheus name token: collapse any
+ * run of disallowed characters (anything outside [a-zA-Z0-9_]) into a single
+ * underscore, then trim leading/trailing underscores.
+ */
+function sanitizeNameToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+/**
+ * Build a factory of per-plugin metric facades over a shared registry. Each
+ * plugin's metrics are name-prefixed with `conductor_plugin_<sanitized_id>_`,
+ * so two plugins can never collide even when they declare the same metric name
+ * with different label sets. Mirrors `openKVDatabase(...).forPlugin(id)`.
+ */
+export function createPluginMetricsFactory(registry: Registry): PluginMetricsFactory {
+  // Full metric names registered per plugin id, for teardown.
+  const namesByPlugin = new Map<string, Set<string>>();
+
+  function fullName(pluginId: string, name: string): string {
+    const idToken = sanitizeNameToken(pluginId);
+    const nameToken = sanitizeNameToken(name);
+    if (nameToken === "") {
+      throw new Error(`Plugin metric name "${name}" is empty after sanitization`);
+    }
+    return `${PLUGIN_METRIC_PREFIX}${idToken}_${nameToken}`;
+  }
+
+  function track(pluginId: string, name: string): void {
+    let set = namesByPlugin.get(pluginId);
+    if (!set) {
+      set = new Set<string>();
+      namesByPlugin.set(pluginId, set);
+    }
+    set.add(name);
+  }
+
+  function forPlugin(pluginId: string): PluginMetrics {
+    function register<T>(name: string, type: string, create: () => T): T {
+      const existing = registry.getSingleMetric(name);
+      if (existing) {
+        // prom-client tags each metric instance with its type; reuse the
+        // existing instance for idempotent re-registration, but reject a
+        // collision with a different metric type under the same name.
+        const existingType = (existing as { type?: string }).type;
+        if (existingType !== type) {
+          throw new Error(`${name} already registered as a ${existingType}`);
+        }
+        return existing as T;
+      }
+      const metric = create();
+      track(pluginId, name);
+      return metric;
+    }
+
+    return {
+      counter(opts) {
+        const name = fullName(pluginId, opts.name);
+        return register(name, "counter", () => {
+          return new Counter({
+            name,
+            help: opts.help,
+            labelNames: opts.labelNames ?? [],
+            registers: [registry],
+          });
+        });
+      },
+      gauge(opts) {
+        const name = fullName(pluginId, opts.name);
+        return register(name, "gauge", () => {
+          return new Gauge({
+            name,
+            help: opts.help,
+            labelNames: opts.labelNames ?? [],
+            registers: [registry],
+          });
+        });
+      },
+      histogram(opts) {
+        const name = fullName(pluginId, opts.name);
+        return register(name, "histogram", () => {
+          return new Histogram({
+            name,
+            help: opts.help,
+            labelNames: opts.labelNames ?? [],
+            ...(opts.buckets ? { buckets: opts.buckets } : {}),
+            registers: [registry],
+          });
+        });
+      },
+    };
+  }
+
+  function removePlugin(pluginId: string): void {
+    const set = namesByPlugin.get(pluginId);
+    if (!set) return;
+    for (const name of set) {
+      registry.removeSingleMetric(name);
+    }
+    namesByPlugin.delete(pluginId);
+  }
+
+  return { forPlugin, removePlugin };
+}
+
 export interface ConductorMetrics {
   sessionsTotal: Counter<"state" | "plugin_id">;
   sessionsActive: Gauge<"state">;
@@ -16,6 +149,7 @@ export interface ConductorMetrics {
 export function createMetrics(): {
   registry: Registry;
   metrics: ConductorMetrics;
+  pluginMetrics: PluginMetricsFactory;
 } {
   const registry = new Registry();
 
@@ -105,6 +239,7 @@ export function createMetrics(): {
       concurrencyWaiting,
       secretsResolutionTotal,
     },
+    pluginMetrics: createPluginMetricsFactory(registry),
   };
 }
 
