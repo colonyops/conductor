@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { Logger } from "../../src/sdk/logger.js";
 import { createScheduler } from "../../src/sdk/scheduler.js";
 
@@ -8,6 +9,11 @@ const noopLogger: Logger = {
   error: () => {},
   with: () => noopLogger,
 };
+
+afterEach(() => {
+  // Reset any frozen clock so other tests use real time.
+  setSystemTime();
+});
 
 describe("createScheduler", () => {
   describe("interval", () => {
@@ -86,6 +92,29 @@ describe("createScheduler", () => {
       // Should NOT have fired yet
       expect(fired).toBe(false);
       handle.cancel();
+    });
+
+    it("re-schedules on each firing and cancel() still stops it afterward", async () => {
+      // Freeze the clock just before HH:MM so each firing recomputes a ~50ms wait.
+      // With the clock frozen, every re-schedule lands on the same near-future target,
+      // so the job fires repeatedly and exercises the timer-set add/delete cycle that
+      // the leak fix introduced — including cancelling after several fires.
+      const frozen = new Date(2026, 0, 1, 10, 0, 59, 950);
+      setSystemTime(frozen);
+
+      const scheduler = createScheduler(noopLogger);
+      let count = 0;
+      const handle = scheduler.schedule(["10:01"], async () => {
+        count++;
+      });
+
+      await new Promise((r) => setTimeout(r, 250));
+      expect(count).toBeGreaterThanOrEqual(2);
+
+      handle.cancel();
+      const countAtCancel = count;
+      await new Promise((r) => setTimeout(r, 150));
+      expect(count).toBe(countAtCancel);
     });
 
     it("cancel() stops scheduled jobs", async () => {
