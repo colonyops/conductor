@@ -283,29 +283,9 @@ export async function loadPlugins(opts: {
   // Load builtin: github-issues
   const giConfig = config.builtins["github-issues"];
   if (giConfig) {
-    process.env.CONDUCTOR_GITHUB_REPO = giConfig.repo;
-    process.env.CONDUCTOR_GITHUB_LABELS = giConfig.labels.join(",");
-    process.env.CONDUCTOR_GITHUB_POLL_INTERVAL_MS = String(giConfig.pollIntervalMs);
-    process.env.CONDUCTOR_GITHUB_TOKEN_SECRET_KEY = giConfig.tokenSecretKey;
-    process.env.CONDUCTOR_GITHUB_TOKEN_SOURCE = giConfig.tokenSource;
-    if (giConfig.assignee) {
-      process.env.CONDUCTOR_GITHUB_ASSIGNEE = giConfig.assignee;
-    }
-    if (giConfig.inProgressLabel) {
-      process.env.CONDUCTOR_GITHUB_IN_PROGRESS_LABEL = giConfig.inProgressLabel;
-    }
-    if (giConfig.doneLabel) {
-      process.env.CONDUCTOR_GITHUB_DONE_LABEL = giConfig.doneLabel;
-    }
-    if (giConfig.maxOpenSessions !== undefined) {
-      process.env.CONDUCTOR_GITHUB_MAX_OPEN_SESSIONS = String(giConfig.maxOpenSessions);
-    }
-
-    let builtinModule: { default: Plugin };
+    let builtinModule: typeof import("./github-issues.js");
     try {
-      builtinModule = (await import("./github-issues.js")) as {
-        default: Plugin;
-      };
+      builtinModule = await import("./github-issues.js");
     } catch (err) {
       globalLogger.error("Failed to import builtin github-issues plugin", {
         error: err instanceof Error ? err.message : String(err),
@@ -313,7 +293,7 @@ export async function loadPlugins(opts: {
       return registrations;
     }
 
-    const plugin = builtinModule.default;
+    const plugin = builtinModule.createGitHubIssuesPlugin(giConfig);
     const pluginLogger = globalLogger.with({ component: plugin.name });
     const scheduler = createScheduler(pluginLogger);
     const kv: KVStore = kvDatabase.forPlugin(plugin.id);
