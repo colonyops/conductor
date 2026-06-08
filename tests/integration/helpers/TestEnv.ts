@@ -133,10 +133,8 @@ export class TestEnv {
 
     for (const pluginOpt of this.opts.plugins ?? []) {
       const hash = await hashPlugin(pluginOpt.path);
-      // We need to load the plugin module to get its id
-      const mod = (await import(pluginOpt.path)) as { default: { id: string } };
-      const pluginId = mod.default.id;
-      trustedPlugins[pluginId] = hash;
+      // Trust is keyed by the config-declared path, matching loadPlugins().
+      trustedPlugins[pluginOpt.path] = hash;
       const entry: ConductorConfig["plugins"][number] = {
         path: pluginOpt.path,
         enabled: true,

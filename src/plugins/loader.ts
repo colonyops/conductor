@@ -23,25 +23,31 @@ export async function hashPlugin(filePath: string): Promise<string> {
   return `sha256:${hasher.digest("hex")}`;
 }
 
-export function getStoredHash(config: ConductorConfig, pluginId: string): string | undefined {
-  return config.trustedPlugins[pluginId];
+// The trust key is the plugin's config-declared path, NOT its `id`. The id lives
+// inside the plugin module and is only known after `import()` executes the module's
+// top-level code — too late to gate execution on. Keying by path lets us verify
+// trust from the file bytes alone, before the module ever runs.
+export function getStoredHash(config: ConductorConfig, trustKey: string): string | undefined {
+  return config.trustedPlugins[trustKey];
 }
 
 export type TrustStatus = "trusted" | "changed" | "unknown";
 
-export function checkTrust(pluginId: string, currentHash: string, config: ConductorConfig): TrustStatus {
-  const stored = config.trustedPlugins[pluginId];
+export function checkTrust(trustKey: string, currentHash: string, config: ConductorConfig): TrustStatus {
+  const stored = config.trustedPlugins[trustKey];
   if (!stored) return "unknown";
   return stored === currentHash ? "trusted" : "changed";
 }
 
 export async function promptTrustApproval(
-  pluginMeta: { name: string; id: string; path: string; hash: string },
+  pluginMeta: { path: string; hash: string },
   reason: "new" | "changed",
   readLineFn?: (question: string) => Promise<string>,
 ): Promise<boolean> {
+  // The prompt deliberately identifies the plugin by path + hash only. Name/id come
+  // from inside the unverified module and would be spoofable, so they are not shown.
   const reasonText = reason === "new" ? "New plugin" : "Plugin file changed";
-  const msg = `\n${reasonText}: ${pluginMeta.name}\n  ID:   ${pluginMeta.id}\n  Path: ${pluginMeta.path}\n  Hash: ${pluginMeta.hash}\n\nAllow this plugin? [y/N]: `;
+  const msg = `\n${reasonText}\n  Path: ${pluginMeta.path}\n  Hash: ${pluginMeta.hash}\n\nAllow this plugin to load and execute? [y/N]: `;
 
   let answer: string;
   if (readLineFn) {
@@ -62,7 +68,7 @@ export async function promptTrustApproval(
 }
 
 export async function persistTrustedPlugins(
-  approvals: Array<{ pluginId: string; hash: string }>,
+  approvals: Array<{ trustKey: string; hash: string }>,
   config: ConductorConfig,
   configPath: string,
 ): Promise<void> {
@@ -70,8 +76,8 @@ export async function persistTrustedPlugins(
     ...config,
     trustedPlugins: { ...config.trustedPlugins },
   };
-  for (const { pluginId, hash } of approvals) {
-    updated.trustedPlugins[pluginId] = hash;
+  for (const { trustKey, hash } of approvals) {
+    updated.trustedPlugins[trustKey] = hash;
   }
   await writeConfig(updated, configPath);
 }
@@ -135,7 +141,7 @@ export async function loadPlugins(opts: {
   const { config, configPath, sessionManager, eventBus, kvDatabase, secrets, globalLogger, readLineFn } = opts;
 
   const registrations: PluginRegistration[] = [];
-  const approvals: Array<{ pluginId: string; hash: string }> = [];
+  const approvals: Array<{ trustKey: string; hash: string }> = [];
 
   type Evaluated = {
     entry: ConductorConfig["plugins"][number];
@@ -144,9 +150,12 @@ export async function loadPlugins(opts: {
   };
   const evaluated: Evaluated[] = [];
 
-  // Phase 1: hash + import + trust check for each enabled user plugin
+  // Phase 1: hash + trust check for each enabled user plugin. Trust MUST be verified
+  // from the file bytes (hash) before `import()`, because importing executes the
+  // module's top-level code. A plugin is only imported once it is trusted/approved.
   for (const entry of config.plugins.filter((p) => p.enabled !== false)) {
     const filePath = resolvePath(entry.path);
+    const trustKey = entry.path;
 
     let hash: string;
     try {
@@ -159,6 +168,32 @@ export async function loadPlugins(opts: {
       continue;
     }
 
+    const status = checkTrust(trustKey, hash, config);
+
+    if (status !== "trusted") {
+      const reason: "new" | "changed" = status === "unknown" ? "new" : "changed";
+      let approved: boolean;
+      try {
+        approved = await promptTrustApproval({ path: filePath, hash }, reason, readLineFn);
+      } catch (err) {
+        globalLogger.error("Trust prompt failed", {
+          path: filePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
+
+      if (!approved) {
+        globalLogger.warn("Plugin rejected at trust prompt", {
+          path: filePath,
+        });
+        continue;
+      }
+
+      approvals.push({ trustKey, hash });
+    }
+
+    // Trust established — only now is it safe to execute the module via import().
     let pluginModule: { default: Plugin };
     try {
       pluginModule = (await import(filePath)) as { default: Plugin };
@@ -170,39 +205,7 @@ export async function loadPlugins(opts: {
       continue;
     }
 
-    const plugin = pluginModule.default;
-    const status = checkTrust(plugin.id, hash, config);
-
-    if (status === "trusted") {
-      evaluated.push({ entry, plugin, hash });
-      continue;
-    }
-
-    const reason: "new" | "changed" = status === "unknown" ? "new" : "changed";
-    let approved: boolean;
-    try {
-      approved = await promptTrustApproval(
-        { name: plugin.name, id: plugin.id, path: filePath, hash },
-        reason,
-        readLineFn,
-      );
-    } catch (err) {
-      globalLogger.error("Trust prompt failed", {
-        pluginId: plugin.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
-
-    if (!approved) {
-      globalLogger.warn("Plugin rejected at trust prompt", {
-        pluginId: plugin.id,
-      });
-      continue;
-    }
-
-    approvals.push({ pluginId: plugin.id, hash });
-    evaluated.push({ entry, plugin, hash });
+    evaluated.push({ entry, plugin: pluginModule.default, hash });
   }
 
   // Phase 2: persist all newly approved plugins atomically
