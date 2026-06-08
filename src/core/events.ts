@@ -25,19 +25,35 @@ export class EventBus {
 
   async emit<E extends CoreEventName>(event: E, payload: CoreEventPayload<E>): Promise<void> {
     const list = this.handlers.get(event) ?? [];
-    for (const h of list) {
-      try {
-        await Promise.race([
-          (h as EventHandler<E>)(payload),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`handler timeout after ${HANDLER_TIMEOUT_MS}ms`)), HANDLER_TIMEOUT_MS),
-          ),
-        ]);
-      } catch (err) {
-        this.logger.error("event handler error", {
-          event,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    // Run handlers concurrently so a slow handler does not block the others.
+    // Each handler is independently timed out and its failures are isolated.
+    await Promise.all(list.map((h) => this.runHandler(event, h as EventHandler<E>, payload)));
+  }
+
+  private async runHandler<E extends CoreEventName>(
+    event: E,
+    handler: EventHandler<E>,
+    payload: CoreEventPayload<E>,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        handler(payload),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`handler timeout after ${HANDLER_TIMEOUT_MS}ms`)),
+            HANDLER_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (err) {
+      this.logger.error("event handler error", {
+        event,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
       }
     }
   }

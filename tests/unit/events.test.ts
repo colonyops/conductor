@@ -59,6 +59,33 @@ describe("EventBus", () => {
     expect(errors.length).toBe(1);
   });
 
+  it("runs handlers concurrently so a slow handler does not block the rest", async () => {
+    const { logger } = makeFakeLogger();
+    const bus = new EventBus(logger);
+    const order: string[] = [];
+    let releaseSlow: (() => void) | undefined;
+    const slowDone = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    bus.on("conductorStart", async () => {
+      order.push("slow-start");
+      await slowDone;
+      order.push("slow-end");
+    });
+    bus.on("conductorStart", async () => {
+      order.push("fast");
+    });
+
+    const emitted = bus.emit("conductorStart", {});
+    // The fast handler completes while the slow handler is still pending.
+    await Promise.resolve();
+    expect(order).toEqual(["slow-start", "fast"]);
+
+    releaseSlow?.();
+    await emitted;
+    expect(order).toEqual(["slow-start", "fast", "slow-end"]);
+  });
+
   it("stops delivering to a handler after it unsubscribes", async () => {
     const { logger } = makeFakeLogger();
     const bus = new EventBus(logger);
