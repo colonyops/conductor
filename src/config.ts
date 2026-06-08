@@ -299,32 +299,52 @@ export function validateConfig(raw: unknown): {
     }
   }
 
-  if (errors.length > 0) {
-    return { config: CONFIG_DEFAULTS, errors };
+  // A field "has an error" if it, or anything nested beneath it, failed
+  // validation. Errored fields fall back to defaults; everything else keeps the
+  // user's value so a single bad field never discards the whole config.
+  const hasError = (prefix: string): boolean =>
+    errors.some((e) => e.field === prefix || e.field.startsWith(`${prefix}.`) || e.field.startsWith(`${prefix}[`));
+
+  // mergeWithDefaults over the user's section, but drop any per-key that errored
+  // so valid siblings survive (e.g. a bad observability.logFormat keeps logPath).
+  function mergeValidKeys<T extends object>(defaults: T, raw: unknown, prefix: string): T {
+    if (!isObject(raw)) return { ...defaults };
+    const overrides: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (!hasError(`${prefix}.${k}`)) overrides[k] = v;
+    }
+    return mergeWithDefaults(defaults, overrides as Partial<T>);
   }
 
   const rawObj = raw as Partial<ConductorConfig>;
 
   const config: ConductorConfig = {
-    plugins: (rawObj.plugins ?? CONFIG_DEFAULTS.plugins).map((p) => ({
-      path: p.path,
-      enabled: p.enabled ?? true,
-      ...(p.idleTimeoutMs !== undefined ? { idleTimeoutMs: p.idleTimeoutMs } : {}),
-      ...(p.concurrencyLimit !== undefined ? { concurrencyLimit: p.concurrencyLimit } : {}),
-    })),
-    trustedPlugins: rawObj.trustedPlugins ?? CONFIG_DEFAULTS.trustedPlugins,
-    concurrency: mergeWithDefaults(CONFIG_DEFAULTS.concurrency, rawObj.concurrency),
-    observability: mergeWithDefaults(
-      CONFIG_DEFAULTS.observability,
-      rawObj.observability as Partial<ConductorConfig["observability"]> | undefined,
-    ),
-    idleTimeoutMs: rawObj.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs,
-    builtins: buildBuiltins(rawObj.builtins),
-    ...(rawObj.prePromptTemplate !== undefined ? { prePromptTemplate: rawObj.prePromptTemplate } : {}),
-    ...(rawObj.postPromptTemplate !== undefined ? { postPromptTemplate: rawObj.postPromptTemplate } : {}),
+    plugins: hasError("plugins")
+      ? CONFIG_DEFAULTS.plugins
+      : (rawObj.plugins ?? CONFIG_DEFAULTS.plugins).map((p) => ({
+          path: p.path,
+          enabled: p.enabled ?? true,
+          ...(p.idleTimeoutMs !== undefined ? { idleTimeoutMs: p.idleTimeoutMs } : {}),
+          ...(p.concurrencyLimit !== undefined ? { concurrencyLimit: p.concurrencyLimit } : {}),
+        })),
+    trustedPlugins: hasError("trustedPlugins")
+      ? CONFIG_DEFAULTS.trustedPlugins
+      : (rawObj.trustedPlugins ?? CONFIG_DEFAULTS.trustedPlugins),
+    concurrency: mergeValidKeys(CONFIG_DEFAULTS.concurrency, rawObj.concurrency, "concurrency"),
+    observability: mergeValidKeys(CONFIG_DEFAULTS.observability, rawObj.observability, "observability"),
+    idleTimeoutMs: hasError("idleTimeoutMs")
+      ? CONFIG_DEFAULTS.idleTimeoutMs
+      : (rawObj.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs),
+    builtins: hasError("builtins") ? CONFIG_DEFAULTS.builtins : buildBuiltins(rawObj.builtins),
+    ...(rawObj.prePromptTemplate !== undefined && !hasError("prePromptTemplate")
+      ? { prePromptTemplate: rawObj.prePromptTemplate }
+      : {}),
+    ...(rawObj.postPromptTemplate !== undefined && !hasError("postPromptTemplate")
+      ? { postPromptTemplate: rawObj.postPromptTemplate }
+      : {}),
   };
 
-  return { config, errors: [] };
+  return { config, errors };
 }
 
 // ── I/O ───────────────────────────────────────────────────────────────────────

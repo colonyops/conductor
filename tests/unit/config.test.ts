@@ -38,6 +38,38 @@ describe("validateConfig", () => {
     expect(fields).toContain("observability.metricsPort");
   });
 
+  it("returns a partially-merged config alongside errors instead of discarding valid fields", () => {
+    const { config, errors } = validateConfig({
+      idleTimeoutMs: 42_000,
+      observability: { logFormat: "yaml", logPath: "/custom/path.log" },
+    });
+    // The single bad field is reported...
+    expect(errors.some((e) => e.field === "observability.logFormat")).toBe(true);
+    // ...but unrelated valid fields are preserved.
+    expect(config.idleTimeoutMs).toBe(42_000);
+    expect(config.observability.logPath).toBe("/custom/path.log");
+    // ...and only the errored field falls back to the default.
+    expect(config.observability.logFormat).toBe(CONFIG_DEFAULTS.observability.logFormat);
+  });
+
+  it("falls back to default only for the errored field, keeping the rest of the section", () => {
+    const { config, errors } = validateConfig({
+      concurrency: { global: -5 },
+    });
+    expect(errors.some((e) => e.field === "concurrency.global")).toBe(true);
+    expect(config.concurrency.global).toBe(CONFIG_DEFAULTS.concurrency.global);
+  });
+
+  it("preserves valid top-level fields when a different section errors", () => {
+    const { config, errors } = validateConfig({
+      idleTimeoutMs: 12_345,
+      plugins: "not an array",
+    });
+    expect(errors.some((e) => e.field === "plugins")).toBe(true);
+    expect(config.idleTimeoutMs).toBe(12_345);
+    expect(config.plugins).toEqual([]);
+  });
+
   it("rejects non-object input", () => {
     const { errors } = validateConfig("not an object");
     expect(errors).toHaveLength(1);
