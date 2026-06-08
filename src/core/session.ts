@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, symlinkSync } from "node:fs";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
 import type { Logger } from "../sdk/logger.js";
-import type { Session, SessionEvent } from "../types.js";
+import type { Session, SessionEvent, SessionState } from "../types.js";
 import type { EventBus } from "./events.js";
 import { hiveNew, hiveRecycle } from "./hive-client.js";
 import { sessionEventsDir } from "./ipc.js";
@@ -130,6 +130,29 @@ export function buildSession(
   };
 }
 
+/**
+ * Returns a copy of `session` moved to `nextState` with active/idle timestamps
+ * stamped. `activeSince` marks the start of the current active period;
+ * `idleSince` marks the start of the current idle period. Each is stamped only
+ * when the session *enters* the corresponding state, so a self-transition
+ * (e.g. ACTIVE+PostToolUse) preserves the original start time. Entering ACTIVE
+ * clears `idleSince`.
+ */
+export function applyStateTimestamps(session: Session, nextState: SessionState, now: Date): Session {
+  if (nextState === session.state) {
+    return { ...session, state: nextState };
+  }
+  if (nextState === "ACTIVE") {
+    // Entering ACTIVE starts a fresh active period and clears any idle marker.
+    const { idleSince, ...rest } = session;
+    return { ...rest, state: nextState, activeSince: now };
+  }
+  if (nextState === "IDLE") {
+    return { ...session, state: nextState, idleSince: now };
+  }
+  return { ...session, state: nextState };
+}
+
 // ── SessionManager ────────────────────────────────────────────────────────────
 
 export interface CreateSessionOptions {
@@ -236,8 +259,8 @@ export class SessionManager {
       });
     }
 
-    // Update session state in place
-    const updatedSession: Session = { ...session, state: result.nextState };
+    // Update session state in place, stamping active/idle timestamps on entry.
+    const updatedSession = applyStateTimestamps(session, result.nextState, new Date());
     this.sessions.set(sessionId, updatedSession);
 
     // Execute side effects in order

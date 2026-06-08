@@ -1,4 +1,76 @@
-import { resolveSignalInvocation } from "../../src/core/session.js";
+import { applyStateTimestamps, resolveSignalInvocation } from "../../src/core/session.js";
+import type { Session, SessionState } from "../../src/types.js";
+
+function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: "test-123",
+    name: "test",
+    state: "CREATED",
+    pluginId: "plugin-a",
+    createdAt: new Date(0),
+    eventsDir: "/tmp/events",
+    workDir: "/tmp/work",
+    isEphemeral: false,
+    ...overrides,
+  };
+}
+
+describe("applyStateTimestamps", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  it("moves the session to the next state", () => {
+    const result = applyStateTimestamps(makeSession({ state: "CREATED" }), "ACTIVE", now);
+    expect(result.state).toBe("ACTIVE");
+  });
+
+  it("sets activeSince and clears idleSince when entering ACTIVE", () => {
+    const session = makeSession({ state: "CREATED" });
+    const result = applyStateTimestamps(session, "ACTIVE", now);
+    expect(result.activeSince).toBe(now);
+    expect(result.idleSince).toBeUndefined();
+  });
+
+  it("clears a prior idleSince when re-entering ACTIVE from IDLE", () => {
+    const session = makeSession({ state: "IDLE", idleSince: new Date(1000) });
+    const result = applyStateTimestamps(session, "ACTIVE", now);
+    expect(result.activeSince).toBe(now);
+    expect(result.idleSince).toBeUndefined();
+  });
+
+  it("sets idleSince and preserves activeSince when entering IDLE", () => {
+    const activeSince = new Date(5000);
+    const session = makeSession({ state: "ACTIVE", activeSince });
+    const result = applyStateTimestamps(session, "IDLE", now);
+    expect(result.idleSince).toBe(now);
+    expect(result.activeSince).toBe(activeSince);
+  });
+
+  it("preserves timestamps on a self-transition (ACTIVE → ACTIVE)", () => {
+    const activeSince = new Date(5000);
+    const session = makeSession({ state: "ACTIVE", activeSince });
+    const result = applyStateTimestamps(session, "ACTIVE", now);
+    expect(result.activeSince).toBe(activeSince);
+    expect(result.idleSince).toBeUndefined();
+  });
+
+  it("does not mutate the input session", () => {
+    const session = makeSession({ state: "ACTIVE", activeSince: new Date(5000) });
+    applyStateTimestamps(session, "IDLE", now);
+    expect(session.state).toBe("ACTIVE");
+    expect(session.idleSince).toBeUndefined();
+  });
+
+  it("leaves timestamps untouched for other states", () => {
+    const activeSince = new Date(5000);
+    const idleSince = new Date(6000);
+    for (const next of ["APPROVAL", "COMPLETE"] as SessionState[]) {
+      const session = makeSession({ state: "IDLE", activeSince, idleSince });
+      const result = applyStateTimestamps(session, next, now);
+      expect(result.activeSince).toBe(activeSince);
+      expect(result.idleSince).toBe(idleSince);
+    }
+  });
+});
 
 describe("resolveSignalInvocation", () => {
   const originalArgv1 = process.argv[1] ?? "";
