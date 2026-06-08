@@ -125,6 +125,40 @@ describe("createSecretsClient", () => {
       }
     });
 
+    it("set() passes the secret via stdin, not as a CLI arg, on macOS", async () => {
+      const writes: string[] = [];
+      const mockProc = {
+        exited: Promise.resolve(0),
+        stdin: { write: (chunk: string) => writes.push(chunk), end: () => {} },
+        stdout: new Response("").body,
+        stderr: new Response("").body,
+      };
+      let capturedArgs: string[] = [];
+      jest.spyOn(Bun, "spawn").mockImplementation(((args: string[]) => {
+        capturedArgs = args;
+        return mockProc as ReturnType<typeof Bun.spawn>;
+      }) as typeof Bun.spawn);
+
+      const savedPlatform = process.platform;
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+      try {
+        const client = createSecretsClient();
+        await client.set("test.key", "super-secret");
+
+        // The secret must not appear anywhere in the process argument list.
+        expect(capturedArgs).not.toContain("super-secret");
+        expect(capturedArgs.join(" ")).not.toContain("super-secret");
+        // `-w` must be the final arg (no inline value following it).
+        expect(capturedArgs[capturedArgs.length - 1]).toBe("-w");
+        // The secret is delivered via stdin, written twice for confirmation.
+        expect(writes.join("")).toBe("super-secret\nsuper-secret\n");
+      } finally {
+        Object.defineProperty(process, "platform", { value: savedPlatform, configurable: true });
+        jest.restoreAllMocks();
+      }
+    });
+
     it("falls through when keychain returns non-zero exit code", async () => {
       const mockProc = {
         exited: Promise.resolve(1),
