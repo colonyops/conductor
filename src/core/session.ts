@@ -64,9 +64,11 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
   existing.permissions = {
     ...permissions,
     allow: [
-      ...allow,
-      `Bash(${invocation} signal stop --session ${sessionId})`,
-      `Bash(${invocation} signal activity --session ${sessionId})`,
+      ...new Set([
+        ...allow,
+        `Bash(${invocation} signal stop --session ${sessionId})`,
+        `Bash(${invocation} signal activity --session ${sessionId})`,
+      ]),
     ],
   };
 

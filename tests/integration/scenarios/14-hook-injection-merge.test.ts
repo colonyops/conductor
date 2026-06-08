@@ -65,4 +65,30 @@ describe("14 — hook injection merge", () => {
     expect(merged.hooks?.Stop).toBeDefined();
     expect(merged.hooks?.PostToolUse).toBeDefined();
   });
+
+  it("does not accumulate duplicate permissions.allow entries on repeated injection", async () => {
+    const sessions = await env.hiveSessionList();
+    const session = sessions[0];
+    expect(session).toBeDefined();
+    if (!session) return;
+
+    const workDir = env.workDir(session);
+    const settingsPath = `${workDir}/.claude/settings.local.json`;
+
+    // Inject multiple times for the same workdir/session
+    await injectHooks(workDir, session.id);
+    await injectHooks(workDir, session.id);
+    await injectHooks(workDir, session.id);
+
+    const merged = JSON.parse(await Bun.file(settingsPath).text()) as {
+      permissions?: { allow?: string[] };
+    };
+
+    const allow = merged.permissions?.allow ?? [];
+    // No duplicate entries
+    expect(new Set(allow).size).toBe(allow.length);
+    // Both conductor signal entries present exactly once
+    expect(allow.filter((e) => e.includes("signal stop")).length).toBe(1);
+    expect(allow.filter((e) => e.includes("signal activity")).length).toBe(1);
+  });
 });
