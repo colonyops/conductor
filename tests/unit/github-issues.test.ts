@@ -73,7 +73,7 @@ interface FakeIssue {
 // makeContext serves one or more pages of issues. Pass a flat array for a
 // single page, or an array of arrays to simulate GitHub pagination — each page
 // after the first is reached by following the rel="next" Link header.
-function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][]) {
+function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][], opts: { failNewSession?: boolean } = {}) {
   const pages: FakeIssue[][] =
     issuesOrPages.length > 0 && Array.isArray(issuesOrPages[0])
       ? (issuesOrPages as FakeIssue[][])
@@ -106,8 +106,9 @@ function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][]) {
   let completeHandler: ((payload: { session: Session }) => Promise<void>) | undefined;
 
   const hive = {
-    async newSession(opts: { name: string }): Promise<Session> {
-      const session = { id: `sess-${created.length + 1}`, name: opts.name, pluginId: "x" } as unknown as Session;
+    async newSession(sessionOpts: { name: string }): Promise<Session> {
+      if (opts.failNewSession) throw new Error("hive unavailable");
+      const session = { id: `sess-${created.length + 1}`, name: sessionOpts.name, pluginId: "x" } as unknown as Session;
       created.push(session);
       return session;
     },
@@ -216,6 +217,34 @@ describe("github-issues lifecycle", () => {
       expect(h.store.has("seen:200")).toBe(true);
     } finally {
       h.restore();
+    }
+  });
+
+  it("records the sessionId on the seen marker after spawning", async () => {
+    const h = makeContext([{ id: 100, number: 7, title: "fix the thing" }]);
+    try {
+      await githubIssuesPlugin.init(h.ctx);
+      await h.runPoll();
+      const seen = h.store.get("seen:100") as { sessionId?: string };
+      expect(seen.sessionId).toBe("sess-1");
+    } finally {
+      h.restore();
+    }
+  });
+
+  it("removes the seen marker and retries when newSession fails", async () => {
+    const issue = { id: 100, number: 7, title: "fix the thing" };
+    const failing = makeContext([issue], { failNewSession: true });
+    try {
+      await githubIssuesPlugin.init(failing.ctx);
+      await failing.runPoll();
+
+      // No session created and the phantom marker is cleaned up so the issue is
+      // not permanently orphaned by a transient failure.
+      expect(failing.created).toHaveLength(0);
+      expect(failing.store.has("seen:100")).toBe(false);
+    } finally {
+      failing.restore();
     }
   });
 

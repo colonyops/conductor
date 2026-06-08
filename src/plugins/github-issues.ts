@@ -97,16 +97,24 @@ async function addLabel(token: string, repo: string, issueNumber: number, label:
 }
 
 // ── KV schema ─────────────────────────────────────────────────────────────────
-//   "seen:<issueId>"      → { sessionId: string; issueNumber: number; createdAt: string; completedAt?: string }
+//   "seen:<issueId>"      → { sessionId?: string; issueNumber: number; createdAt: string; completedAt?: string }
 //   "session:<sessionId>" → { issueId: number; issueNumber: number; repo: string }
 //
 // The "seen:" marker is permanent for the lifetime of an open issue. It is set
-// when a session is first spawned and is NOT removed when that session
+// *before* a session is spawned and is NOT removed when that session
 // completes — otherwise a still-open issue (PR review pending) would be picked
 // up again on the next poll, spawning an endless stream of duplicate sessions.
+//
+// Writing "seen:" before newSession() closes a crash window: if the process
+// dies after the session starts but before the marker is written, the next poll
+// would see the issue as unseen and spawn a duplicate. With this ordering a
+// crash instead leaves a phantom "seen:" marker (no session) — safe, since at
+// worst an issue is skipped rather than worked twice. The marker carries no
+// sessionId until the session is created, so it is optional here. A *caught*
+// newSession() failure removes the marker so the issue can be retried next poll.
 
 interface SeenEntry {
-  sessionId: string;
+  sessionId?: string;
   issueNumber: number;
   createdAt: string;
   completedAt?: string;
@@ -221,6 +229,14 @@ export default definePlugin({
           title: issue.title,
         });
 
+        // Mark the issue seen BEFORE spawning the session. A crash between this
+        // write and newSession() leaves a phantom marker (no session) — the
+        // issue is skipped, never worked twice.
+        await kv.set<SeenEntry>(seenKey, {
+          issueNumber: issue.number,
+          createdAt: new Date().toISOString(),
+        });
+
         let sessionId: string;
         try {
           const session = await hive.newSession({
@@ -230,6 +246,8 @@ export default definePlugin({
           });
           sessionId = session.id;
         } catch (err) {
+          // Remove the marker so a transient failure can be retried next poll.
+          await kv.delete(seenKey);
           logger.error("GitHub Issues: failed to create session", {
             issueNumber: issue.number,
             error: err instanceof Error ? err.message : String(err),
