@@ -44,7 +44,13 @@ export function parseNextLink(linkHeader: string | null): string | undefined {
   return undefined;
 }
 
-async function fetchIssues(token: string, repo: string, labels: string[], assignee?: string): Promise<GitHubIssue[]> {
+async function fetchIssues(
+  token: string,
+  repo: string,
+  labels: string[],
+  assignee?: string,
+  onRateLimit?: () => void,
+): Promise<GitHubIssue[]> {
   const labelParam = encodeURIComponent(labels.join(","));
   let url: string | undefined =
     `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
@@ -65,6 +71,7 @@ async function fetchIssues(token: string, repo: string, labels: string[], assign
     if (res.status === 401 || res.status === 403) {
       const rateLimitRemaining = res.headers.get("X-RateLimit-Remaining");
       if (rateLimitRemaining === "0") {
+        onRateLimit?.();
         throw new Error(`GitHub rate limit exceeded (status ${res.status}). Backing off.`);
       }
       throw new Error(`GitHub API authentication error (status ${res.status}).`);
@@ -141,7 +148,7 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
     name: "GitHub Issues",
     requiredSecrets: [],
 
-    async init({ kv, hive, secrets, scheduler, logger }) {
+    async init({ kv, hive, secrets, scheduler, logger, metrics }) {
       const {
         repo,
         labels,
@@ -158,6 +165,39 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
         logger.warn("GitHub Issues plugin: missing repo or labels, skipping");
         return;
       }
+
+      const pollsTotal = metrics.counter({
+        name: "polls_total",
+        help: "Poll attempts by result",
+        labelNames: ["result"],
+      });
+      const pollDuration = metrics.histogram({
+        name: "poll_duration_ms",
+        help: "Poll duration in milliseconds",
+        buckets: [50, 100, 500, 1000, 5000, 10000],
+      });
+      const issuesSeen = metrics.counter({
+        name: "issues_seen_total",
+        help: "New issues picked up across polls",
+      });
+      const sessionsCreated = metrics.counter({
+        name: "sessions_created_total",
+        help: "Sessions created by result",
+        labelNames: ["result"],
+      });
+      const rateLimited = metrics.counter({
+        name: "rate_limited_total",
+        help: "GitHub rate-limit responses encountered",
+      });
+      const labelUpdates = metrics.counter({
+        name: "label_updates_total",
+        help: "Issue label updates by label and result",
+        labelNames: ["label", "result"],
+      });
+      const openSessions = metrics.gauge({
+        name: "open_sessions",
+        help: "Currently open sessions owned by this plugin",
+      });
 
       let token: string;
       try {
@@ -181,15 +221,24 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
       });
 
       async function poll(): Promise<void> {
-        let issues: GitHubIssue[];
+        const endTimer = pollDuration.startTimer();
         try {
-          issues = await fetchIssues(token, repo, labels, assignee);
+          await pollOnce();
+          pollsTotal.inc({ result: "ok" });
         } catch (err) {
+          pollsTotal.inc({ result: "error" });
           logger.error("GitHub Issues: poll failed", {
             error: err instanceof Error ? err.message : String(err),
           });
-          return;
+        } finally {
+          endTimer();
         }
+      }
+
+      async function pollOnce(): Promise<void> {
+        const issues = await fetchIssues(token, repo, labels, assignee, () => rateLimited.inc());
+
+        openSessions.set(hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length);
 
         for (const issue of issues) {
           const seenKey = `seen:${issue.id}`;
@@ -207,6 +256,7 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
             }
           }
 
+          issuesSeen.inc();
           logger.info("GitHub Issues: new issue found, creating session", {
             issueNumber: issue.number,
             title: issue.title,
@@ -228,7 +278,9 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
               context: `Issue #${issue.number}: ${issue.title}\n${issue.html_url}`,
             });
             sessionId = session.id;
+            sessionsCreated.inc({ result: "ok" });
           } catch (err) {
+            sessionsCreated.inc({ result: "error" });
             // Remove the marker so a transient failure can be retried next poll.
             await kv.delete(seenKey);
             logger.error("GitHub Issues: failed to create session", {
@@ -252,7 +304,9 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
           if (inProgressLabel) {
             try {
               await addLabel(token, repo, issue.number, inProgressLabel);
+              labelUpdates.inc({ label: inProgressLabel, result: "ok" });
             } catch (err) {
+              labelUpdates.inc({ label: inProgressLabel, result: "error" });
               logger.warn("GitHub Issues: failed to add in-progress label", {
                 issueNumber: issue.number,
                 error: err instanceof Error ? err.message : String(err),
@@ -276,7 +330,9 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
         if (doneLabel) {
           try {
             await addLabel(token, entry.repo, entry.issueNumber, doneLabel);
+            labelUpdates.inc({ label: doneLabel, result: "ok" });
           } catch (err) {
+            labelUpdates.inc({ label: doneLabel, result: "error" });
             logger.warn("GitHub Issues: failed to add done label", {
               issueNumber: entry.issueNumber,
               error: err instanceof Error ? err.message : String(err),

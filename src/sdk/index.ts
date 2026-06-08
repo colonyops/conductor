@@ -21,6 +21,12 @@ export type {
 } from "./http.js";
 export { createHttpClient } from "./http.js";
 export type { Plugin, PluginContext, PluginMeta } from "../types.js";
+export type {
+  PluginMetrics,
+  PluginMetricOptions,
+  PluginHistogramOptions,
+} from "../core/observability.js";
+export type { Counter, Gauge, Histogram } from "prom-client";
 
 /**
  * Identity helper — provides TypeScript type checking for plugin modules.

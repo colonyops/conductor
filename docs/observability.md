@@ -76,7 +76,79 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 
 `backend` values: `env`, `keychain`, `stdin`. `result` values: `hit`, `miss`.
 
-> Most metrics are defined but not yet fully instrumented and will report zero values. `conductor_ipc_events_total` is the only counter currently active.
+> Most core metrics are defined but not yet fully instrumented and will report zero values. `conductor_ipc_events_total` is the only core counter currently active.
+
+---
+
+## Plugin metrics
+
+Plugins can register and emit their own custom metrics through the `metrics` handle on the `PluginContext`. Plugin metrics render at the same `/metrics` endpoint as core metrics — no extra wiring required.
+
+### Naming and isolation
+
+Every plugin-registered metric name is automatically prefixed with:
+
+```
+conductor_plugin_<sanitized_plugin_id>_
+```
+
+The plugin id is baked into the metric **name** (not just a label), so two plugins can **never** collide — even if they declare the same metric name with different label sets (which would otherwise throw at registration in `prom-client`). This follows Prometheus' own subsystem-prefix convention (`go_`, `process_`, `nodejs_`).
+
+```
+plugin "acme.deploybot"                   -> conductor_plugin_acme_deploybot_deploys_total
+plugin "conductor.builtin.github-issues"  -> conductor_plugin_conductor_builtin_github_issues_polls_total
+```
+
+**Sanitization** — both the plugin id and the metric name are normalized to valid Prometheus name tokens (`[a-zA-Z0-9_]`): any run of disallowed characters collapses to a single `_`, and leading/trailing `_` are trimmed. Because the fixed prefix is always prepended, a plugin cannot escape its namespace via a crafted name (e.g. `name: "../core"` → `conductor_plugin_<id>_core`). A name that is empty after sanitization is rejected.
+
+### API
+
+The `metrics` handle returns real `prom-client` instances, so plugins get the full familiar API (`.inc()`, `.observe()`, `.startTimer()`, `.labels()`):
+
+```ts
+export interface PluginMetricOptions {
+  name: string;          // namespaced automatically; do NOT include the conductor_plugin_ prefix
+  help: string;
+  labelNames?: string[]; // plugin-defined dimensions; the prefix handles isolation
+}
+export interface PluginHistogramOptions extends PluginMetricOptions {
+  buckets?: number[];
+}
+export interface PluginMetrics {
+  counter(opts: PluginMetricOptions): Counter<string>;
+  gauge(opts: PluginMetricOptions): Gauge<string>;
+  histogram(opts: PluginHistogramOptions): Histogram<string>;
+}
+```
+
+Registration is **idempotent**: calling `counter()`/`gauge()`/`histogram()` again with the same name returns the existing instance instead of throwing. Re-registering a name under a different metric type throws a clear error. When a plugin is unloaded its metrics are removed from the registry (counters reset on reload).
+
+```ts
+async init({ metrics, scheduler, logger }) {
+  const polls = metrics.counter({ name: "polls_total", help: "Poll attempts", labelNames: ["result"] });
+  const pollMs = metrics.histogram({ name: "poll_duration_ms", help: "Poll duration", buckets: [50, 100, 500, 1000, 5000] });
+  scheduler.interval(pollIntervalMs, async () => {
+    const end = pollMs.startTimer();
+    try { await poll(); polls.inc({ result: "ok" }); }
+    catch { polls.inc({ result: "error" }); }
+    finally { end(); }
+  });
+}
+```
+
+### Built-in `github-issues` metrics
+
+The built-in `github-issues` plugin ships these metrics as a reference implementation. Names below are shown without the `conductor_plugin_conductor_builtin_github_issues_` prefix.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `polls_total` | Counter | `result` (`ok`/`error`) |
+| `poll_duration_ms` | Histogram | — |
+| `issues_seen_total` | Counter | — |
+| `sessions_created_total` | Counter | `result` (`ok`/`error`) |
+| `rate_limited_total` | Counter | — |
+| `label_updates_total` | Counter | `label`, `result` (`ok`/`error`) |
+| `open_sessions` | Gauge | — |
 
 ---
 

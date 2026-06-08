@@ -459,7 +459,7 @@ program
         logger,
       });
 
-      const { registry, metrics } = createMetrics();
+      const { registry, metrics, pluginMetrics } = createMetrics();
       const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
 
       const registrations = await loadPlugins({
@@ -468,6 +468,7 @@ program
         sessionManager,
         eventBus,
         kvDatabase,
+        pluginMetrics,
         secrets,
         globalLogger: logger,
       });
