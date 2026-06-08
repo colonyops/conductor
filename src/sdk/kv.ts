@@ -20,6 +20,11 @@ type AllKeyRow = { plugin_id: string; key: string; value: string };
 
 export type KVEntry = { pluginId: string; key: string; value: string };
 
+/** Escape SQLite LIKE wildcards (`\`, `%`, `_`) so a prefix is matched literally. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 export class BunSqliteKVStore implements KVStore {
   constructor(
     private readonly pluginId: string,
@@ -55,9 +60,10 @@ export class BunSqliteKVStore implements KVStore {
 
   async keys(prefix?: string): Promise<string[]> {
     if (prefix !== undefined) {
+      const pattern = `${escapeLikePattern(prefix)}%`;
       const rows = this.db
-        .query<KeyRow, [string, string]>("SELECT key FROM kv WHERE plugin_id = ? AND key LIKE ? || '%'")
-        .all(this.pluginId, prefix);
+        .query<KeyRow, [string, string]>("SELECT key FROM kv WHERE plugin_id = ? AND key LIKE ? ESCAPE '\\'")
+        .all(this.pluginId, pattern);
       return rows.map((r) => r.key);
     }
     const rows = this.db.query<KeyRow, [string]>("SELECT key FROM kv WHERE plugin_id = ?").all(this.pluginId);
