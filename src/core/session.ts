@@ -22,6 +22,25 @@ export function resolveSignalInvocation(): string {
   return process.execPath;
 }
 
+// A single hook matcher entry as Claude Code stores it: a group of one or more
+// command hooks. We only ever inject command hooks, so this narrow shape is enough.
+type HookEntry = { hooks?: Array<{ type?: string; command?: string }> };
+
+// Returns true if any command hook inside the entry matches `command`.
+function entryHasCommand(entry: unknown, command: string): boolean {
+  const hooks = (entry as HookEntry)?.hooks;
+  if (!Array.isArray(hooks)) return false;
+  return hooks.some((h) => h?.command === command);
+}
+
+// Appends conductor's command hook to a pre-existing hook array without dropping
+// the caller's entries. Deduplicates by command string so re-injection is idempotent.
+function appendHook(existing: unknown, command: string): HookEntry[] {
+  const arr = Array.isArray(existing) ? (existing as HookEntry[]) : [];
+  if (arr.some((entry) => entryHasCommand(entry, command))) return arr;
+  return [...arr, { hooks: [{ type: "command", command }] }];
+}
+
 export async function injectHooks(workDir: string, sessionId: string): Promise<void> {
   const claudeDir = `${workDir}/.claude`;
   const settingsPath = `${claudeDir}/settings.local.json`;
@@ -34,40 +53,21 @@ export async function injectHooks(workDir: string, sessionId: string): Promise<v
 
   const hooks = (existing.hooks as Record<string, unknown> | undefined) ?? {};
   const invocation = resolveSignalInvocation();
+  const stopCommand = `${invocation} signal stop --session ${sessionId}`;
+  const activityCommand = `${invocation} signal activity --session ${sessionId}`;
 
   existing.hooks = {
     ...hooks,
-    Stop: [
-      {
-        hooks: [
-          {
-            type: "command",
-            command: `${invocation} signal stop --session ${sessionId}`,
-          },
-        ],
-      },
-    ],
-    PostToolUse: [
-      {
-        hooks: [
-          {
-            type: "command",
-            command: `${invocation} signal activity --session ${sessionId}`,
-          },
-        ],
-      },
-    ],
+    Stop: appendHook(hooks.Stop, stopCommand),
+    PostToolUse: appendHook(hooks.PostToolUse, activityCommand),
   };
 
   const permissions = (existing.permissions as Record<string, unknown> | undefined) ?? {};
   const allow = (permissions.allow as string[] | undefined) ?? [];
+  const allowEntries = [`Bash(${stopCommand})`, `Bash(${activityCommand})`];
   existing.permissions = {
     ...permissions,
-    allow: [
-      ...allow,
-      `Bash(${invocation} signal stop --session ${sessionId})`,
-      `Bash(${invocation} signal activity --session ${sessionId})`,
-    ],
+    allow: [...allow, ...allowEntries.filter((entry) => !allow.includes(entry))],
   };
 
   mkdirSync(claudeDir, { recursive: true });
