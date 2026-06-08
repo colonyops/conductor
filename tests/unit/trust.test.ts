@@ -77,33 +77,33 @@ describe("hashPlugin", () => {
 // ── getStoredHash ─────────────────────────────────────────────────────────────
 
 describe("getStoredHash", () => {
-  it("returns the stored hash when the plugin id is present", () => {
-    const config = makeConfig({ "my-plugin": "sha256:abc123" });
-    expect(getStoredHash(config, "my-plugin")).toBe("sha256:abc123");
+  it("returns the stored hash when the trust key is present", () => {
+    const config = makeConfig({ "./plugins/my.ts": "sha256:abc123" });
+    expect(getStoredHash(config, "./plugins/my.ts")).toBe("sha256:abc123");
   });
 
-  it("returns undefined when the plugin id is absent", () => {
+  it("returns undefined when the trust key is absent", () => {
     const config = makeConfig();
-    expect(getStoredHash(config, "unknown-plugin")).toBeUndefined();
+    expect(getStoredHash(config, "./plugins/unknown.ts")).toBeUndefined();
   });
 });
 
 // ── checkTrust ────────────────────────────────────────────────────────────────
 
 describe("checkTrust", () => {
-  it("returns 'unknown' when the plugin id is not in trustedPlugins", () => {
+  it("returns 'unknown' when the trust key is not in trustedPlugins", () => {
     const config = makeConfig();
-    expect(checkTrust("new-plugin", "sha256:abc", config)).toBe("unknown");
+    expect(checkTrust("./plugins/new.ts", "sha256:abc", config)).toBe("unknown");
   });
 
   it("returns 'trusted' when hash matches stored hash", () => {
-    const config = makeConfig({ "my-plugin": "sha256:abc" });
-    expect(checkTrust("my-plugin", "sha256:abc", config)).toBe("trusted");
+    const config = makeConfig({ "./plugins/my.ts": "sha256:abc" });
+    expect(checkTrust("./plugins/my.ts", "sha256:abc", config)).toBe("trusted");
   });
 
   it("returns 'changed' when hash differs from stored hash", () => {
-    const config = makeConfig({ "my-plugin": "sha256:abc" });
-    expect(checkTrust("my-plugin", "sha256:xyz", config)).toBe("changed");
+    const config = makeConfig({ "./plugins/my.ts": "sha256:abc" });
+    expect(checkTrust("./plugins/my.ts", "sha256:xyz", config)).toBe("changed");
   });
 });
 
@@ -111,8 +111,6 @@ describe("checkTrust", () => {
 
 describe("promptTrustApproval", () => {
   const meta = {
-    name: "My Plugin",
-    id: "my-plugin",
     path: "/path/to/plugin.ts",
     hash: "sha256:abc123",
   };
@@ -155,13 +153,12 @@ describe("promptTrustApproval", () => {
     expect(capturedQuestion).toContain("Plugin file changed");
   });
 
-  it("includes plugin id, path, and hash in the prompt", async () => {
+  it("includes path and hash in the prompt", async () => {
     let capturedQuestion = "";
     await promptTrustApproval(meta, "new", async (q) => {
       capturedQuestion = q;
       return "n";
     });
-    expect(capturedQuestion).toContain("my-plugin");
     expect(capturedQuestion).toContain("/path/to/plugin.ts");
     expect(capturedQuestion).toContain("sha256:abc123");
   });
@@ -177,29 +174,29 @@ describe("persistTrustedPlugins", () => {
   });
 
   it("writes approved hashes into config file", async () => {
-    const config = makeConfig({ "existing-plugin": "sha256:old" });
+    const config = makeConfig({ "./plugins/existing.ts": "sha256:old" });
     const configPath = join(dir, "conductor.config.json");
-    const approvals = [{ pluginId: "new-plugin", hash: "sha256:new123" }];
+    const approvals = [{ trustKey: "./plugins/new.ts", hash: "sha256:new123" }];
 
     await persistTrustedPlugins(approvals, config, configPath);
 
     const written = JSON.parse(await Bun.file(configPath).text()) as ConductorConfig;
-    expect(written.trustedPlugins["new-plugin"]).toBe("sha256:new123");
-    expect(written.trustedPlugins["existing-plugin"]).toBe("sha256:old");
+    expect(written.trustedPlugins["./plugins/new.ts"]).toBe("sha256:new123");
+    expect(written.trustedPlugins["./plugins/existing.ts"]).toBe("sha256:old");
   });
 
   it("does not modify the original config object", async () => {
     const config = makeConfig();
     const configPath = join(dir, "conductor.config.json");
-    await persistTrustedPlugins([{ pluginId: "p", hash: "sha256:h" }], config, configPath);
-    expect(config.trustedPlugins.p).toBeUndefined();
+    await persistTrustedPlugins([{ trustKey: "./plugins/p.ts", hash: "sha256:h" }], config, configPath);
+    expect(config.trustedPlugins["./plugins/p.ts"]).toBeUndefined();
   });
 
-  it("overwrites an existing hash for the same plugin id", async () => {
-    const config = makeConfig({ "my-plugin": "sha256:old" });
+  it("overwrites an existing hash for the same trust key", async () => {
+    const config = makeConfig({ "./plugins/my.ts": "sha256:old" });
     const configPath = join(dir, "conductor.config.json");
-    await persistTrustedPlugins([{ pluginId: "my-plugin", hash: "sha256:new" }], config, configPath);
+    await persistTrustedPlugins([{ trustKey: "./plugins/my.ts", hash: "sha256:new" }], config, configPath);
     const written = JSON.parse(await Bun.file(configPath).text()) as ConductorConfig;
-    expect(written.trustedPlugins["my-plugin"]).toBe("sha256:new");
+    expect(written.trustedPlugins["./plugins/my.ts"]).toBe("sha256:new");
   });
 });

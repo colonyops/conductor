@@ -72,32 +72,48 @@ export function watchIpcEvents(handler: IpcEventHandler): { stop(): void } {
   // On macOS, fs.watch({ recursive }) may return only the leaf filename or a
   // full relative path depending on the runtime version, so we avoid path
   // parsing entirely and scan all session subdirectories instead.
+  //
+  // `draining` ensures a single drain runs at a time; `dirty` records that a
+  // watch event arrived mid-drain so we re-drain once the current pass ends.
+  // Without the re-drain, files written during the drain window would have no
+  // future fs.watch event to trigger their processing and would be lost.
   let draining = false;
+  let dirty = false;
+
+  const drainAll = async () => {
+    const entries = readdirSync(sessionsDir);
+    for (const entry of entries) {
+      try {
+        if (!statSync(join(sessionsDir, entry)).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      const events = await drainEventFiles(entry);
+      for (const event of events) {
+        try {
+          await handler(event);
+        } catch {
+          // handler errors don't kill the watcher
+        }
+      }
+    }
+  };
 
   const watcher = watch(sessionsDir, { recursive: true }, (_eventType, filename) => {
     if (!filename) return;
     if (!filename.endsWith(".json")) return;
-    if (draining) return;
+    if (draining) {
+      dirty = true;
+      return;
+    }
     draining = true;
 
     void (async () => {
       try {
-        const entries = readdirSync(sessionsDir);
-        for (const entry of entries) {
-          try {
-            if (!statSync(join(sessionsDir, entry)).isDirectory()) continue;
-          } catch {
-            continue;
-          }
-          const events = await drainEventFiles(entry);
-          for (const event of events) {
-            try {
-              await handler(event);
-            } catch {
-              // handler errors don't kill the watcher
-            }
-          }
-        }
+        do {
+          dirty = false;
+          await drainAll();
+        } while (dirty);
       } catch {
         // ignore scan errors
       } finally {

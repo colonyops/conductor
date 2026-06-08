@@ -157,4 +157,56 @@ describe("watchIpcEvents", () => {
       stop();
     }
   }, 15_000);
+
+  it("does not drop events written while a drain is in progress", async () => {
+    // The watcher scans every session dir in the shared test data dir, so
+    // filter to this test's session to ignore undrained files from other tests.
+    const received: string[] = [];
+    let firstHandlerStarted = false;
+    let releaseFirstHandler: () => void = () => {};
+    const firstHandlerGate = new Promise<void>((r) => {
+      releaseFirstHandler = r;
+    });
+
+    const { stop } = watchIpcEvents(async (event) => {
+      // Block the first handler so additional files land while the drain loop
+      // is still running — exactly the window the dirty flag must cover.
+      if (!firstHandlerStarted) {
+        firstHandlerStarted = true;
+        await firstHandlerGate;
+      }
+      if (event.sessionId === "sess-burst") received.push(event.signal);
+    });
+
+    try {
+      await new Promise((r) => setTimeout(r, 200));
+      mkdirSync(sessionEventsDir("sess-burst"), { recursive: true });
+      await new Promise((r) => setTimeout(r, 500));
+
+      // First write triggers the watch callback and enters the (blocked) handler.
+      await writeIpcEvent("sess-burst", "activity");
+      const startDeadline = Date.now() + 5_000;
+      while (!firstHandlerStarted && Date.now() < startDeadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(firstHandlerStarted).toBe(true);
+
+      // These writes occur while the first drain is in progress. Their watch
+      // events hit the `draining` guard and only set `dirty`. They must still
+      // be processed by the re-drain after the current pass completes.
+      await writeIpcEvent("sess-burst", "stop");
+      await writeIpcEvent("sess-burst", "activity");
+      await new Promise((r) => setTimeout(r, 200));
+
+      releaseFirstHandler();
+
+      const deadline = Date.now() + 5_000;
+      while (received.length < 3 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(received).toHaveLength(3);
+    } finally {
+      stop();
+    }
+  }, 15_000);
 });

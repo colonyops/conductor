@@ -1,4 +1,6 @@
-import { type AcceptTrustDeps, acceptTrustPrompt } from "../../src/core/hive-client.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { type AcceptTrustDeps, acceptTrustPrompt, deriveWorkDir } from "../../src/core/hive-client.js";
 import type { Logger } from "../../src/sdk/logger.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,6 +58,34 @@ function makeDeps(overrides: Partial<AcceptTrustDeps> = {}): { deps: AcceptTrust
   };
   return { deps, counters };
 }
+
+// ── deriveWorkDir ─────────────────────────────────────────────────────────────
+
+describe("deriveWorkDir", () => {
+  const originalDataDir = process.env.HIVE_DATA_DIR;
+
+  afterEach(() => {
+    if (originalDataDir === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to the string "undefined"
+      delete process.env.HIVE_DATA_DIR;
+    } else {
+      process.env.HIVE_DATA_DIR = originalDataDir;
+    }
+  });
+
+  it("reconstructs the <dataDir>/repos/<repo>-<id> checkout path", () => {
+    process.env.HIVE_DATA_DIR = "/tmp/hive-data";
+    expect(deriveWorkDir("conductor", "uc8176")).toBe("/tmp/hive-data/repos/conductor-uc8176");
+  });
+
+  it("falls back to the default hive data dir when HIVE_DATA_DIR is unset", () => {
+    // biome-ignore lint/performance/noDelete: assigning undefined coerces to the string "undefined"
+    delete process.env.HIVE_DATA_DIR;
+    expect(deriveWorkDir("conductor", "uc8176")).toBe(
+      join(homedir(), ".local/share/hive", "repos", "conductor-uc8176"),
+    );
+  });
+});
 
 // ── acceptTrustPrompt ───────────────────────────────────────────────────────────
 
