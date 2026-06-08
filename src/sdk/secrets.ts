@@ -89,7 +89,15 @@ async function ghCLIToken(): Promise<string | undefined> {
   return undefined;
 }
 
-async function promptStdin(key: string): Promise<string> {
+/**
+ * Serializes interactive prompts. Concurrent secret.get() calls share a single
+ * stdin, so without this chain multiple `once("data")` listeners would resolve
+ * from the same input chunk and cross-talk between requests. Each prompt waits
+ * for the previous one to settle before resuming stdin and reading.
+ */
+let promptChain: Promise<unknown> = Promise.resolve();
+
+function readOnePrompt(key: string): Promise<string> {
   process.stdout.write(`Enter secret for "${key}": `);
   return new Promise<string>((resolve) => {
     process.stdin.resume();
@@ -99,6 +107,13 @@ async function promptStdin(key: string): Promise<string> {
       resolve(String(chunk).trim());
     });
   });
+}
+
+async function promptStdin(key: string): Promise<string> {
+  const result = promptChain.then(() => readOnePrompt(key));
+  // Keep the chain alive even if this prompt rejects, so later prompts still run.
+  promptChain = result.catch(() => undefined);
+  return result;
 }
 
 export function createSecretsClient(): SecretsClient {

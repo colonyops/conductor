@@ -32,6 +32,68 @@ describe("createSecretsClient", () => {
     });
   });
 
+  describe("concurrent interactive prompts", () => {
+    it("serializes stdin so concurrent prompts do not cross-talk", async () => {
+      // keychainGet / keychainSet both go through Bun.spawn; make every spawn
+      // report failure so get() falls through to the interactive prompt.
+      const failingProc = () =>
+        ({
+          exited: Promise.resolve(1),
+          stdout: new Response("").body,
+          stderr: new Response("").body,
+        }) as ReturnType<typeof Bun.spawn>;
+      jest.spyOn(Bun, "spawn").mockImplementation(failingProc);
+
+      const savedPlatform = process.platform;
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+      // Capture each registered once("data") handler instead of touching real stdin.
+      const handlers: Array<(chunk: string) => void> = [];
+      const onceSpy = jest
+        .spyOn(process.stdin, "once")
+        .mockImplementation((event: string | symbol, handler: (...args: unknown[]) => void) => {
+          if (event === "data") handlers.push(handler as (chunk: string) => void);
+          return process.stdin;
+        });
+      const resumeSpy = jest.spyOn(process.stdin, "resume").mockReturnValue(process.stdin);
+      const pauseSpy = jest.spyOn(process.stdin, "pause").mockReturnValue(process.stdin);
+      const encodingSpy = jest.spyOn(process.stdin, "setEncoding").mockReturnValue(process.stdin);
+      const stdoutSpy = jest.spyOn(process.stdout, "write").mockReturnValue(true);
+
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+
+      try {
+        const client = createSecretsClient();
+        const a = client.get("key.a", { promptIfMissing: true });
+        const b = client.get("key.b", { promptIfMissing: true });
+
+        // Both started, but serialization means only one listener is live.
+        await tick();
+        expect(handlers.length).toBe(1);
+
+        handlers[0]?.("secret-a");
+
+        // After the first settles, the second prompt registers its listener.
+        await tick();
+        await tick();
+        expect(handlers.length).toBe(2);
+
+        handlers[1]?.("secret-b");
+
+        expect(await a).toBe("secret-a");
+        expect(await b).toBe("secret-b");
+      } finally {
+        onceSpy.mockRestore();
+        resumeSpy.mockRestore();
+        pauseSpy.mockRestore();
+        encodingSpy.mockRestore();
+        stdoutSpy.mockRestore();
+        Object.defineProperty(process, "platform", { value: savedPlatform, configurable: true });
+        jest.restoreAllMocks();
+      }
+    });
+  });
+
   describe("keychain mock", () => {
     it("resolves from macOS keychain when security command succeeds", async () => {
       // Spy on Bun.spawn to simulate a successful keychain lookup
