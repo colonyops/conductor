@@ -187,7 +187,11 @@ export class TestEnv {
       stdout: "pipe",
       stderr: "pipe",
     });
-    await proc.exited;
+    const code = await proc.exited;
+    if (code !== 0) {
+      const err = await new Response(proc.stderr).text();
+      throw new Error(`hive session list failed (${code}): ${err.trim()}`);
+    }
     const output = await new Response(proc.stdout).text();
     return output
       .trim()
