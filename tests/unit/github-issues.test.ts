@@ -1,4 +1,4 @@
-import githubIssuesPlugin, { issueSlug } from "../../src/plugins/github-issues.js";
+import githubIssuesPlugin, { issueSlug, parseNextLink } from "../../src/plugins/github-issues.js";
 import type { PluginContext, Session } from "../../src/types.js";
 
 describe("issueSlug", () => {
@@ -42,6 +42,26 @@ describe("issueSlug", () => {
   });
 });
 
+describe("parseNextLink", () => {
+  it("returns undefined for a null header", () => {
+    expect(parseNextLink(null)).toBeUndefined();
+  });
+
+  it('extracts the rel="next" URL', () => {
+    const header =
+      '<https://api.github.com/repositories/1/issues?page=2>; rel="next", ' +
+      '<https://api.github.com/repositories/1/issues?page=5>; rel="last"';
+    expect(parseNextLink(header)).toBe("https://api.github.com/repositories/1/issues?page=2");
+  });
+
+  it("returns undefined when there is no next page", () => {
+    const header =
+      '<https://api.github.com/repositories/1/issues?page=1>; rel="prev", ' +
+      '<https://api.github.com/repositories/1/issues?page=1>; rel="first"';
+    expect(parseNextLink(header)).toBeUndefined();
+  });
+});
+
 // ── Polling / lifecycle ─────────────────────────────────────────────────────
 
 interface FakeIssue {
@@ -50,7 +70,14 @@ interface FakeIssue {
   title: string;
 }
 
-function makeContext(issues: FakeIssue[]) {
+// makeContext serves one or more pages of issues. Pass a flat array for a
+// single page, or an array of arrays to simulate GitHub pagination — each page
+// after the first is reached by following the rel="next" Link header.
+function makeContext(issuesOrPages: FakeIssue[] | FakeIssue[][]) {
+  const pages: FakeIssue[][] =
+    issuesOrPages.length > 0 && Array.isArray(issuesOrPages[0])
+      ? (issuesOrPages as FakeIssue[][])
+      : [issuesOrPages as FakeIssue[]];
   const store = new Map<string, unknown>();
   const kv = {
     async get<T>(key: string): Promise<T | undefined> {
@@ -116,16 +143,28 @@ function makeContext(issues: FakeIssue[]) {
   const ctx = { kv, hive, scheduler, logger, secrets, http: {} } as unknown as PluginContext;
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify(issues), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })) as unknown as typeof fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    fetchCalls++;
+    const url = typeof input === "string" ? input : input.toString();
+    const pageMatch = url.match(/[?&]page=(\d+)/);
+    const pageNum = pageMatch ? Number(pageMatch[1]) : 1;
+    const pageIndex = pageNum - 1;
+    const body = pages[pageIndex] ?? [];
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (pageIndex + 1 < pages.length) {
+      const base = url.replace(/[?&]page=\d+/, "");
+      const sep = base.includes("?") ? "&" : "?";
+      headers.Link = `<${base}${sep}page=${pageNum + 1}>; rel="next"`;
+    }
+    return new Response(JSON.stringify(body), { status: 200, headers });
+  }) as unknown as typeof fetch;
 
   return {
     ctx,
     store,
     created,
+    fetchCalls: () => fetchCalls,
     runPoll: () => pollFn?.() ?? Promise.resolve(),
     complete: (session: Session) => completeHandler?.({ session }) ?? Promise.resolve(),
     restore: () => {
@@ -159,6 +198,22 @@ describe("github-issues lifecycle", () => {
       await h.runPoll();
       expect(h.created).toHaveLength(1);
       expect(h.store.has("seen:100")).toBe(true);
+    } finally {
+      h.restore();
+    }
+  });
+
+  it("paginates and spawns sessions for issues beyond the first page", async () => {
+    const page1: FakeIssue[] = [{ id: 100, number: 7, title: "first page" }];
+    const page2: FakeIssue[] = [{ id: 200, number: 8, title: "second page" }];
+    const h = makeContext([page1, page2]);
+    try {
+      await githubIssuesPlugin.init(h.ctx);
+      await h.runPoll();
+      expect(h.fetchCalls()).toBe(2);
+      expect(h.created).toHaveLength(2);
+      expect(h.store.has("seen:100")).toBe(true);
+      expect(h.store.has("seen:200")).toBe(true);
     } finally {
       h.restore();
     }

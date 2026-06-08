@@ -29,33 +29,55 @@ export function issueSlug(number: number, title: string, maxLen = 40): string {
 
 // ── GitHub REST helpers ───────────────────────────────────────────────────────
 
+// parseNextLink extracts the rel="next" URL from a GitHub Link response header.
+// GitHub paginates list endpoints and advertises the next page via this header,
+// e.g. `<https://api.github.com/...&page=2>; rel="next", <...>; rel="last"`.
+// Returns undefined when there is no further page.
+export function parseNextLink(linkHeader: string | null): string | undefined {
+  if (!linkHeader) return undefined;
+  for (const part of linkHeader.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
 async function fetchIssues(token: string, repo: string, labels: string[], assignee?: string): Promise<GitHubIssue[]> {
   const labelParam = encodeURIComponent(labels.join(","));
-  let url = `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
+  let url: string | undefined =
+    `https://api.github.com/repos/${repo}/issues?state=open&labels=${labelParam}&per_page=100`;
   if (assignee) {
     url += `&assignee=${encodeURIComponent(assignee)}`;
   }
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
 
-  if (res.status === 401 || res.status === 403) {
-    const rateLimitRemaining = res.headers.get("X-RateLimit-Remaining");
-    if (rateLimitRemaining === "0") {
-      throw new Error(`GitHub rate limit exceeded (status ${res.status}). Backing off.`);
+  const issues: GitHubIssue[] = [];
+  while (url) {
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      const rateLimitRemaining = res.headers.get("X-RateLimit-Remaining");
+      if (rateLimitRemaining === "0") {
+        throw new Error(`GitHub rate limit exceeded (status ${res.status}). Backing off.`);
+      }
+      throw new Error(`GitHub API authentication error (status ${res.status}).`);
     }
-    throw new Error(`GitHub API authentication error (status ${res.status}).`);
+
+    if (!res.ok) {
+      throw new Error(`GitHub API error fetching issues: HTTP ${res.status}`);
+    }
+
+    const page = (await res.json()) as GitHubIssue[];
+    issues.push(...page);
+    url = parseNextLink(res.headers.get("Link"));
   }
 
-  if (!res.ok) {
-    throw new Error(`GitHub API error fetching issues: HTTP ${res.status}`);
-  }
-
-  return res.json() as Promise<GitHubIssue[]>;
+  return issues;
 }
 
 async function addLabel(token: string, repo: string, issueNumber: number, label: string): Promise<void> {
