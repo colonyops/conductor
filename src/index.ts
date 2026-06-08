@@ -302,7 +302,7 @@ interface HttpClient {
   patch<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
   delete<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
 
-  withBearer(tokenFn: () => Promise<string>): HttpClient;
+  withBearer(tokenFn: () => string | null | Promise<string | null>): HttpClient;
   withRequestInterceptor(fn: RequestInterceptor): HttpClient;
   withResponseInterceptor(fn: ResponseInterceptor): HttpClient;
 }

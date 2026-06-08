@@ -2,6 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type RequestInterceptor = (init: RequestInit) => RequestInit;
 export type ResponseInterceptor = (response: Response, init?: RequestInit) => void;
+export type BearerTokenProvider = () => string | null | Promise<string | null>;
 
 export interface HttpRequestArgs<T = unknown> {
   url: string;
@@ -26,7 +27,7 @@ export interface HttpClient {
   delete<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
   withRequestInterceptor(fn: RequestInterceptor): HttpClient;
   withResponseInterceptor(fn: ResponseInterceptor): HttpClient;
-  withBearer(token: () => string | null): HttpClient;
+  withBearer(token: BearerTokenProvider): HttpClient;
 }
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -36,7 +37,7 @@ const BODY_METHODS = new Set<Method>(["POST", "PUT", "PATCH"]);
 export function createHttpClient(logger: Logger, baseHeaders: Record<string, string> = {}): HttpClient {
   const requestInterceptors: RequestInterceptor[] = [];
   const responseInterceptors: ResponseInterceptor[] = [];
-  let getBearer: () => string | null = () => null;
+  let getBearer: BearerTokenProvider = () => null;
 
   function applyRequestInterceptors(init: RequestInit): RequestInit {
     return requestInterceptors.reduce((acc, fn) => fn(acc), init);
@@ -45,7 +46,7 @@ export function createHttpClient(logger: Logger, baseHeaders: Record<string, str
   async function doRequest<T>(method: Method, args: HttpRequestArgs): Promise<HttpResponse<T>> {
     const headers: Record<string, string> = { ...baseHeaders, ...args.headers };
 
-    const token = getBearer();
+    const token = await getBearer();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
