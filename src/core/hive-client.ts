@@ -153,8 +153,15 @@ function encodeProjectPath(absPath: string): string {
   return absPath.replace(/\//g, "-").replace(/\./g, "");
 }
 
-// Matches Claude Code's "Do you trust the files in this folder?" trust dialog.
-const TRUST_PROMPT_PATTERN = /do you trust the files|trust the files in this folder/i;
+// Matches Claude Code's first-run trust/safety dialog. The wording has changed
+// across versions — older builds asked "Do you trust the files in this folder?",
+// newer ones ask "Quick safety check: Is this a project you created or one you
+// trust?" with a "Yes, I trust this folder" option — so we match several stable
+// anchors rather than a single phrase. This dialog is shown even under
+// `--dangerously-skip-permissions` (it precedes bypass mode), so it must always
+// be detected and dismissed.
+const TRUST_PROMPT_PATTERN =
+  /do you trust the files|trust the files in this folder|trust this folder|project you created or one you trust/i;
 
 // hasTrustPrompt tests pane content for the trust dialog. `tmux capture-pane`
 // hard-wraps at pane width, so the dialog text can be split across lines
@@ -165,12 +172,37 @@ function hasTrustPrompt(content: string): boolean {
   return TRUST_PROMPT_PATTERN.test(content.replace(/\s+/g, " "));
 }
 
+export interface TmuxWindow {
+  index: string;
+  name: string;
+  active: boolean;
+}
+
 // External operations acceptTrustPrompt depends on, injectable for testing.
 export interface AcceptTrustDeps {
+  listWindows(sessionName: string): Promise<TmuxWindow[]>;
   capturePane(target: string): Promise<{ ok: boolean; content: string }>;
   sendKeys(target: string, keys: string[]): Promise<boolean>;
   sleep(ms: number): Promise<void>;
   alreadyTrusted(workDir: string): boolean;
+}
+
+async function tmuxListWindows(sessionName: string): Promise<TmuxWindow[]> {
+  const proc = Bun.spawn(
+    ["tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}\t#{window_name}\t#{window_active}"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) return [];
+  const out = await new Response(proc.stdout).text();
+  return out
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [index = "", name = "", active = ""] = line.split("\t");
+      return { index, name, active: active === "1" };
+    });
 }
 
 async function tmuxCapturePane(target: string): Promise<{ ok: boolean; content: string }> {
@@ -192,11 +224,24 @@ async function tmuxSendKeys(target: string, keys: string[]): Promise<boolean> {
 }
 
 const defaultTrustDeps: AcceptTrustDeps = {
+  listWindows: tmuxListWindows,
   capturePane: tmuxCapturePane,
   sendKeys: tmuxSendKeys,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   alreadyTrusted: (workDir) => existsSync(join(homedir(), ".claude", "projects", encodeProjectPath(workDir))),
 };
+
+// Resolves the tmux pane targets to scan for a trust prompt. The agent window's
+// name is not fixed — hive names it after the agent command (claude, codex, pi,
+// aider, …) and that can change — so we never assume a window name. We instead
+// scan every window in the session and let pane content decide which one is
+// blocked on the dialog. If the windows can't be listed we fall back to the
+// session's active window (bare session target).
+async function trustScanTargets(sessionName: string, deps: AcceptTrustDeps): Promise<string[]> {
+  const windows = await deps.listWindows(sessionName).catch(() => [] as TmuxWindow[]);
+  if (windows.length === 0) return [sessionName];
+  return windows.map((w) => `${sessionName}:${w.index}`);
+}
 
 export interface AcceptTrustOptions {
   pollIntervalMs?: number;
@@ -273,17 +318,21 @@ export async function acceptTrustPrompt(
   // brief window confirming none appears. Otherwise wait the full timeout for
   // the prompt to render (slow startup, large repo indexing, cold cache).
   const windowMs = trusted ? Math.min(timeoutMs, trustedVerifyMs) : timeoutMs;
-  const target = `${sessionName}:claude`;
   const maxAttempts = Math.max(1, Math.ceil(windowMs / pollIntervalMs));
   let paneAccessible = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const { ok, content } = await deps.capturePane(target);
-    paneAccessible = paneAccessible || ok;
+    // Don't assume which window the agent runs in. Scan every window in the
+    // session and let pane content identify the one blocked on the dialog.
+    const targets = await trustScanTargets(sessionName, deps);
+    for (const target of targets) {
+      const { ok, content } = await deps.capturePane(target);
+      paneAccessible = paneAccessible || ok;
 
-    if (ok && hasTrustPrompt(content)) {
-      await dismissTrustPrompt(target, sessionName, deps, maxKeyAttempts, pollIntervalMs, logger);
-      return;
+      if (ok && hasTrustPrompt(content)) {
+        await dismissTrustPrompt(target, sessionName, deps, maxKeyAttempts, pollIntervalMs, logger);
+        return;
+      }
     }
 
     if (attempt < maxAttempts - 1) {
@@ -296,17 +345,17 @@ export async function acceptTrustPrompt(
     // trusted — the expected, healthy case.
     logger?.debug("no trust prompt within verification window; folder already trusted", {
       session: sessionName,
-      target,
     });
     return;
   }
 
-  // The folder is not known-trusted and no prompt ever appeared. Either it
-  // never rendered or it rendered after the window closed, leaving the session
-  // blocked on the dialog. Surface it so the session is not treated as healthy.
+  // The folder is not known-trusted and no prompt ever appeared in any window.
+  // Either it never rendered or it rendered after the window closed, leaving the
+  // session blocked on the dialog. Surface it so the session is not treated as
+  // healthy.
   throw new Error(
-    `trust prompt not detected within ${timeoutMs}ms for session "${sessionName}" (target ${target}, ` +
-      `paneAccessible=${paneAccessible}); session may be blocked on the trust dialog`,
+    `trust prompt not detected within ${timeoutMs}ms for session "${sessionName}" ` +
+      `(paneAccessible=${paneAccessible}); session may be blocked on the trust dialog`,
   );
 }
 
