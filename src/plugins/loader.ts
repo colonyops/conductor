@@ -237,6 +237,7 @@ export async function loadPlugins(opts: {
       pluginId: plugin.id,
       sessionManager,
       eventBus,
+      ...(entry.idleTimeoutMs !== undefined ? { idleTimeoutMs: entry.idleTimeoutMs } : {}),
     });
     const hive = makeTrackingHiveClient(baseHive, unsubscribes);
 

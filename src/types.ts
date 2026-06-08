@@ -22,6 +22,13 @@ export interface Session {
   eventsDir: string;
   workDir: string;
   isEphemeral: boolean;
+  /**
+   * Effective idle timeout for this session, resolved at creation from the
+   * per-session override (NewSessionOptions) falling back to the owning
+   * plugin's configured `idleTimeoutMs`. Undefined means use the global
+   * `config.idleTimeoutMs`.
+   */
+  idleTimeoutMs?: number;
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────

@@ -116,6 +116,7 @@ export function buildSession(
   pluginId: string,
   workDir: string,
   isEphemeral: boolean,
+  idleTimeoutMs?: number,
 ): Session {
   const eventsDir = sessionEventsDir(id);
   return {
@@ -127,6 +128,7 @@ export function buildSession(
     eventsDir,
     workDir,
     isEphemeral,
+    ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
   };
 }
 
@@ -215,7 +217,7 @@ export class SessionManager {
         }
       }
 
-      const session = buildSession(id, opts.name, opts.pluginId, workDir, false);
+      const session = buildSession(id, opts.name, opts.pluginId, workDir, false, opts.idleTimeoutMs);
       this.sessions.set(id, session);
 
       await this.eventBus.emit("sessionCreated", { session });
@@ -241,8 +243,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    const idleTimeoutMs =
-      this.config.plugins.find((p) => p.path === session.pluginId)?.idleTimeoutMs ?? this.config.idleTimeoutMs;
+    const idleTimeoutMs = session.idleTimeoutMs ?? this.config.idleTimeoutMs;
 
     const transitionOpts: Parameters<typeof transition>[2] = { idleTimeoutMs };
     if (opts.isApprovalPending !== undefined) {
