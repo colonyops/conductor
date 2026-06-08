@@ -55,6 +55,15 @@ describe("writeIpcEvent", () => {
     const [filename] = readdirSync(eventsDir);
     expect(filename).not.toContain(":");
   });
+
+  it("does not drop events when called repeatedly with the same signal", async () => {
+    const count = 50;
+    await Promise.all(Array.from({ length: count }, () => writeIpcEvent("sess-collision", "activity")));
+    const eventsDir = sessionEventsDir("sess-collision");
+    const files = readdirSync(eventsDir);
+    expect(files).toHaveLength(count);
+    expect(new Set(files).size).toBe(count);
+  });
 });
 
 describe("drainEventFiles", () => {

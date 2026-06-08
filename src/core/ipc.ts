@@ -22,9 +22,13 @@ export async function writeIpcEvent(sessionId: string, signal: IpcSignal): Promi
     timestamp: new Date().toISOString(),
   };
 
+  // The ms prefix preserves lexicographic time-ordering in drainEventFiles.
+  // The random suffix guarantees uniqueness: this runs in separate Claude Code
+  // hook processes, so two calls within the same millisecond with the same
+  // signal would otherwise collide and the second write would clobber the first.
   const ms = Date.now();
   const safeSignal = signal.replace(":", "-");
-  const filename = `${ms}-${safeSignal}.json`;
+  const filename = `${ms}-${safeSignal}-${crypto.randomUUID()}.json`;
   await Bun.write(join(eventsDir, filename), JSON.stringify(event));
 }
 
