@@ -6,6 +6,11 @@ import type { Logger } from "../../src/sdk/logger.js";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TRUST_PANE = "Do you trust the files in this folder?\n  1. Yes, proceed\n  2. No, exit";
+// Newer Claude Code wording — different phrasing, same dialog.
+const TRUST_PANE_NEW =
+  "Quick safety check: Is this a project you created or one you trust? (Like your own code,\n" +
+  "a well-known open source project, or work from your team).\n" +
+  " ❯ 1. Yes, I trust this folder\n   2. No, exit\n Enter to confirm · Esc to cancel";
 const CLEARED_PANE = "● Welcome to Claude Code\n> ";
 
 interface RecordingLogger extends Logger {
@@ -42,6 +47,7 @@ function makeDeps(overrides: Partial<AcceptTrustDeps> = {}): { deps: AcceptTrust
   let promptVisible = true;
   const deps: AcceptTrustDeps = {
     alreadyTrusted: () => false,
+    listWindows: async () => [{ index: "1", name: "claude", active: true }],
     capturePane: async () => {
       counters.captureCalls++;
       return { ok: true, content: promptVisible ? TRUST_PANE : CLEARED_PANE };
@@ -93,7 +99,60 @@ describe("acceptTrustPrompt", () => {
   it("sends Enter and verifies the prompt cleared on the happy path", async () => {
     const { deps, counters } = makeDeps();
     await acceptTrustPrompt("my-session", "/work/dir", { deps, pollIntervalMs: 1 });
-    expect(counters.sendKeysCalls).toEqual([{ target: "my-session:claude", keys: ["Enter"] }]);
+    expect(counters.sendKeysCalls).toEqual([{ target: "my-session:1", keys: ["Enter"] }]);
+  });
+
+  it("matches the newer 'Quick safety check / trust this folder' wording", async () => {
+    let promptVisible = true;
+    const { deps, counters } = makeDeps({
+      capturePane: async () => ({ ok: true, content: promptVisible ? TRUST_PANE_NEW : CLEARED_PANE }),
+      sendKeys: async (target, keys) => {
+        counters.sendKeysCalls.push({ target, keys });
+        promptVisible = false;
+        return true;
+      },
+    });
+    await acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1 });
+    expect(counters.sendKeysCalls).toHaveLength(1);
+  });
+
+  it("finds the trust prompt by content regardless of the agent window name", async () => {
+    // The agent window is named "codex", not "claude", and is not the first
+    // window. Detection must rely on pane content, not the window name.
+    let promptVisible = true;
+    const { deps, counters } = makeDeps({
+      listWindows: async () => [
+        { index: "1", name: "shell", active: false },
+        { index: "2", name: "codex", active: true },
+      ],
+      capturePane: async (target) => {
+        if (target === "sess:2") return { ok: true, content: promptVisible ? TRUST_PANE_NEW : CLEARED_PANE };
+        return { ok: true, content: "a normal shell\n❯ " };
+      },
+      sendKeys: async (target, keys) => {
+        counters.sendKeysCalls.push({ target, keys });
+        promptVisible = false;
+        return true;
+      },
+    });
+    await acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1 });
+    expect(counters.sendKeysCalls).toEqual([{ target: "sess:2", keys: ["Enter"] }]);
+  });
+
+  it("falls back to the active window when windows cannot be listed", async () => {
+    let promptVisible = true;
+    const { deps, counters } = makeDeps({
+      listWindows: async () => [],
+      capturePane: async () => ({ ok: true, content: promptVisible ? TRUST_PANE : CLEARED_PANE }),
+      sendKeys: async (target, keys) => {
+        counters.sendKeysCalls.push({ target, keys });
+        promptVisible = false;
+        return true;
+      },
+    });
+    await acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1 });
+    // Bare session target addresses the session's active window.
+    expect(counters.sendKeysCalls).toEqual([{ target: "sess", keys: ["Enter"] }]);
   });
 
   it("only verifies a short window when the folder is already trusted", async () => {
