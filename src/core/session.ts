@@ -178,6 +178,7 @@ export class SessionManager {
         ...(prompt !== undefined ? { prompt } : {}),
         ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
         tags: ["conductor"],
+        ...(this.logger !== undefined ? { logger: this.logger } : {}),
       });
 
       // Ensure events dir exists
