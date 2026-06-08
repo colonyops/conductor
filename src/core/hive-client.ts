@@ -39,6 +39,14 @@ function hiveDataDir(): string {
   return process.env.HIVE_DATA_DIR ?? join(homedir(), ".local/share/hive");
 }
 
+// hive lays out each session's checkout at <dataDir>/repos/<repo>-<id>. `hive
+// batch` returns this path directly for newly created sessions, but `hive
+// session list --json` does not include it, so we reconstruct it from the
+// session record when resolving the workDir for an already-existing session.
+export function deriveWorkDir(repo: string, id: string): string {
+  return join(hiveDataDir(), "repos", `${repo}-${id}`);
+}
+
 function extractJSON(raw: string): string {
   // Strip ANSI escape codes, then find the last top-level JSON object
   // (hook output precedes it on stdout).
@@ -127,7 +135,7 @@ export async function hiveNew(args: HiveNewSessionArgs): Promise<{ id: string; w
       if (result?.error?.includes("already exists")) {
         const existing = (await hiveSessionList()).find((s) => s.name === args.name);
         if (existing) {
-          return { id: existing.id, workDir: "", existed: true };
+          return { id: existing.id, workDir: deriveWorkDir(existing.repo, existing.id), existed: true };
         }
       }
       throw new Error(`hive batch did not create session: ${result?.error ?? result?.status ?? "no result"}`);
