@@ -32,8 +32,10 @@ export function createHiveClient(opts: {
   pluginId: string;
   sessionManager: SessionManager;
   eventBus: EventBus;
+  /** Per-plugin idle timeout from config; used when a session omits its own override. */
+  idleTimeoutMs?: number;
 }): HiveClient {
-  const { pluginId, sessionManager, eventBus } = opts;
+  const { pluginId, sessionManager, eventBus, idleTimeoutMs: pluginIdleTimeoutMs } = opts;
 
   function sub<E extends CoreEventName>(name: E, handler: SessionEventHandler<E>): () => void {
     return eventBus.on(name, handler);
@@ -41,7 +43,12 @@ export function createHiveClient(opts: {
 
   return {
     async newSession(sessionOpts) {
-      return sessionManager.createSession({ ...sessionOpts, pluginId });
+      const idleTimeoutMs = sessionOpts.idleTimeoutMs ?? pluginIdleTimeoutMs;
+      return sessionManager.createSession({
+        ...sessionOpts,
+        pluginId,
+        ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
+      });
     },
 
     async ephemeralSession(_sessionOpts) {

@@ -1,4 +1,4 @@
-import { applyStateTimestamps, resolveSignalInvocation } from "../../src/core/session.js";
+import { applyStateTimestamps, buildSession, resolveSignalInvocation } from "../../src/core/session.js";
 import type { Session, SessionState } from "../../src/types.js";
 
 function makeSession(overrides: Partial<Session> = {}): Session {
@@ -69,6 +69,19 @@ describe("applyStateTimestamps", () => {
       expect(result.activeSince).toBe(activeSince);
       expect(result.idleSince).toBe(idleSince);
     }
+  });
+});
+
+describe("buildSession", () => {
+  it("stores the resolved idleTimeoutMs when provided", () => {
+    const session = buildSession("id-1", "name", "plugin-a", "/work", false, 12_345);
+    expect(session.idleTimeoutMs).toBe(12_345);
+  });
+
+  it("omits idleTimeoutMs when not provided so the global default applies", () => {
+    const session = buildSession("id-1", "name", "plugin-a", "/work", false);
+    expect(session.idleTimeoutMs).toBeUndefined();
+    expect("idleTimeoutMs" in session).toBe(false);
   });
 });
 
