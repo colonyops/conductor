@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Registry } from "prom-client";
 import type { ConductorConfig } from "../../src/config.js";
 import { EventBus } from "../../src/core/events.js";
+import { createPluginMetricsFactory } from "../../src/core/observability.js";
 import { SessionManager } from "../../src/core/session.js";
 import { loadPlugins } from "../../src/plugins/loader.js";
 import { createConcurrencyLimiter } from "../../src/sdk/concurrency.js";
@@ -79,6 +81,7 @@ function makeOpts(config: ConductorConfig, configPath: string, dataDir: string, 
     logger,
   });
   const kvDatabase = openKVDatabase(dataDir);
+  const pluginMetrics = createPluginMetricsFactory(new Registry());
   return {
     opts: {
       config,
@@ -86,6 +89,7 @@ function makeOpts(config: ConductorConfig, configPath: string, dataDir: string, 
       sessionManager,
       eventBus,
       kvDatabase,
+      pluginMetrics,
       secrets: noopSecrets,
       globalLogger: logger,
       readLineFn: async () => answer,
