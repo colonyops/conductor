@@ -276,23 +276,37 @@ describe("acceptTrustPrompt", () => {
     expect(logger.warns[0]?.msg).toContain("send-keys failed");
   });
 
-  it("throws when the prompt never appears and the folder is not trusted", async () => {
+  it("proceeds without error when no prompt appears and the folder is not trusted", async () => {
+    // "No prompt" is overwhelmingly the already-trusted case; failing here would
+    // recycle a healthy session, so acceptTrustPrompt must not throw.
+    const logger = makeLogger();
     const { deps, counters } = makeDeps({
       capturePane: async () => ({ ok: true, content: "no prompt here" }),
     });
-    await expect(acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1, timeoutMs: 3 })).rejects.toThrow(
-      /not detected within 3ms/,
-    );
+    await acceptTrustPrompt("sess", "/work/dir", { deps, logger, pollIntervalMs: 1, timeoutMs: 3 });
+    expect(counters.sendKeysCalls).toHaveLength(0);
+    expect(logger.warns.some((w) => w.msg.includes("no trust prompt or ready state"))).toBe(true);
+  });
+
+  it("proceeds (does not throw) even when the pane is never accessible", async () => {
+    const { deps, counters } = makeDeps({
+      capturePane: async () => ({ ok: false, content: "" }),
+    });
+    await acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1, timeoutMs: 3 });
     expect(counters.sendKeysCalls).toHaveLength(0);
   });
 
-  it("includes paneAccessible=false in the error when capture never succeeds", async () => {
-    const { deps } = makeDeps({
-      capturePane: async () => ({ ok: false, content: "" }),
+  it("returns as soon as a running REPL is detected, without sending keys", async () => {
+    // Already-trusted folder: no dialog, the REPL is up. Recognized as healthy.
+    const { deps, counters } = makeDeps({
+      alreadyTrusted: () => false,
+      capturePane: async () => ({
+        ok: true,
+        content: "● Claude Code\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n❯ ",
+      }),
     });
-    await expect(acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1, timeoutMs: 3 })).rejects.toThrow(
-      /paneAccessible=false/,
-    );
+    await acceptTrustPrompt("sess", "/work/dir", { deps, pollIntervalMs: 1, timeoutMs: 5_000 });
+    expect(counters.sendKeysCalls).toHaveLength(0);
   });
 
   it("returns without error when no prompt appears but the folder is trusted", async () => {
