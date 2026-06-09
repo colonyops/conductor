@@ -172,6 +172,19 @@ function hasTrustPrompt(content: string): boolean {
   return TRUST_PROMPT_PATTERN.test(content.replace(/\s+/g, " "));
 }
 
+// Matches a running Claude Code REPL — the session has started and is past any
+// first-run dialog. Conductor always launches with --dangerously-skip-permissions
+// so "bypass permissions" is reliably present once ready; the startup banner and
+// footer hints cover the moments before the first turn. This lets us positively
+// confirm a healthy session that showed no trust prompt (e.g. an already-trusted
+// folder, which is common because hive reuses recycled checkout paths) instead
+// of waiting out the full timeout and then guessing whether it is stuck.
+const READY_PATTERN = /bypass permissions|\? for shortcuts|tips for getting started|welcome to claude code/i;
+
+function isSessionReady(content: string): boolean {
+  return READY_PATTERN.test(content.replace(/\s+/g, " "));
+}
+
 export interface TmuxWindow {
   index: string;
   name: string;
@@ -289,16 +302,19 @@ async function dismissTrustPrompt(
 }
 
 // acceptTrustPrompt accepts Claude Code's first-run trust dialog for a freshly
-// created session. It polls the tmux pane until the prompt is rendered rather
-// than guessing a fixed delay, confirms the dialog actually cleared after
-// sending Enter, and throws when the session is left blocked on the dialog so
-// the caller can surface it instead of treating a stuck session as healthy.
+// created session. It polls the tmux panes until it sees either the prompt
+// (which it dismisses, confirming it actually cleared) or a running REPL (the
+// folder was already trusted, so no prompt is shown). If neither appears within
+// the window it proceeds anyway: "no prompt" is overwhelmingly the already-
+// trusted case, and recycling a healthy session over it is worse than the rare
+// genuinely-stuck session, which surfaces later through its lack of signals.
+// The only hard failure is a prompt that is detected but cannot be dismissed.
 //
 // `alreadyTrusted` is treated as a hint, not a guarantee: it is keyed on the
 // project dir existing under ~/.claude/projects, which can be a false positive
-// (path reuse after recycle, or a dir created for another reason). When the
-// hint says trusted we still verify the pane shows no prompt — over a short
-// window rather than the full timeout — and dismiss one if it appears anyway.
+// (path reuse after recycle) and a false negative (a trusted folder Claude
+// tracks under a differently-encoded path). It only shortens the poll window;
+// correctness no longer depends on it.
 export async function acceptTrustPrompt(
   sessionName: string,
   workDir: string,
@@ -323,7 +339,8 @@ export async function acceptTrustPrompt(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Don't assume which window the agent runs in. Scan every window in the
-    // session and let pane content identify the one blocked on the dialog.
+    // session and let pane content identify the one blocked on the dialog (or
+    // the one already running, when no dialog is shown).
     const targets = await trustScanTargets(sessionName, deps);
     for (const target of targets) {
       const { ok, content } = await deps.capturePane(target);
@@ -333,6 +350,13 @@ export async function acceptTrustPrompt(
         await dismissTrustPrompt(target, sessionName, deps, maxKeyAttempts, pollIntervalMs, logger);
         return;
       }
+
+      if (ok && isSessionReady(content)) {
+        // The REPL is up and no dialog is present — the folder was already
+        // trusted. Healthy; nothing to dismiss.
+        logger?.debug("session ready, no trust prompt shown", { session: sessionName, target });
+        return;
+      }
     }
 
     if (attempt < maxAttempts - 1) {
@@ -340,23 +364,18 @@ export async function acceptTrustPrompt(
     }
   }
 
-  if (trusted) {
-    // No prompt within the verification window and the folder was already
-    // trusted — the expected, healthy case.
-    logger?.debug("no trust prompt within verification window; folder already trusted", {
-      session: sessionName,
-    });
-    return;
-  }
-
-  // The folder is not known-trusted and no prompt ever appeared in any window.
-  // Either it never rendered or it rendered after the window closed, leaving the
-  // session blocked on the dialog. Surface it so the session is not treated as
-  // healthy.
-  throw new Error(
-    `trust prompt not detected within ${timeoutMs}ms for session "${sessionName}" ` +
-      `(paneAccessible=${paneAccessible}); session may be blocked on the trust dialog`,
-  );
+  // Neither a trust prompt nor a running REPL appeared within the window. A
+  // prompt that was going to render does so within a second or two of startup,
+  // so by far the most likely cause is an already-trusted folder that simply
+  // shows no prompt (and whose REPL banner we didn't happen to match). Failing
+  // here would recycle a healthy session — exactly the stuck-session symptom we
+  // want to avoid — so we proceed instead. A genuinely blocked session surfaces
+  // later through its absence of lifecycle signals rather than by being killed.
+  logger?.[trusted ? "debug" : "warn"]("no trust prompt or ready state detected; proceeding", {
+    session: sessionName,
+    paneAccessible,
+    trusted,
+  });
 }
 
 export async function hiveRecycle(sessionId: string): Promise<void> {
