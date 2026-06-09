@@ -53,7 +53,10 @@ Register the file in conductor.config.json:
 \`\`\`
 
 On first load, Conductor computes a SHA-256 hash of the file and prompts for
-approval. Approved hashes are written back to \`trustedPlugins\` in the config.
+approval **before importing the module** (importing runs its top-level code, so
+trust is established from the file bytes first). Approved hashes are written back
+to \`trustedPlugins\` in the config, keyed by the config-declared \`path\`. If the
+file changes, the hash no longer matches and you are re-prompted on next startup.
 
 ---
 
@@ -78,6 +81,7 @@ interface PluginContext {
   scheduler: Scheduler;
   logger:    Logger;
   http:      HttpClient;
+  metrics:   PluginMetrics;   // register plugin-namespaced Prometheus metrics
 }
 \`\`\`
 
@@ -174,12 +178,15 @@ ctx.hive.onSessionComplete(async ({ session }) => {
 
 ### ctx.secrets — SecretsClient
 
-Resolve secrets from environment variables, the OS keychain (macOS \`security\`,
-Linux \`secret-tool\`), or interactive stdin prompt.
+Resolve secrets from environment variables, the \`gh\` CLI, the OS keychain
+(macOS \`security\`, Linux \`secret-tool\`), or interactive stdin prompt.
+Resolution order: env (if \`env\` set) → \`gh auth token\` (if \`ghCLI\`) →
+OS keychain → interactive prompt (if \`promptIfMissing\`).
 
 \`\`\`ts
 interface GetSecretOptions {
   env?:             string;    // env var name to try first
+  ghCLI?:           boolean;   // try \`gh auth token\` before the keychain
   promptIfMissing?: boolean;   // prompt the user interactively if not found
 }
 
@@ -321,6 +328,47 @@ console.log(res.data.items);
 
 ---
 
+### ctx.metrics — PluginMetrics
+
+Register custom Prometheus metrics. Each metric name is automatically prefixed
+with \`conductor_plugin_<sanitized_plugin_id>_\`, so two plugins can never
+collide — do NOT include that prefix yourself. Metrics render at the same
+\`/metrics\` endpoint as core metrics. Registration is idempotent (same name
+returns the existing instance); re-registering a name under a different metric
+type throws. A plugin's metrics are removed from the registry when it unloads.
+
+\`\`\`ts
+interface PluginMetricOptions {
+  name: string;          // namespaced automatically; no conductor_plugin_ prefix
+  help: string;
+  labelNames?: string[];
+}
+interface PluginHistogramOptions extends PluginMetricOptions {
+  buckets?: number[];
+}
+interface PluginMetrics {
+  counter(opts: PluginMetricOptions): Counter<string>;     // prom-client instances
+  gauge(opts: PluginMetricOptions): Gauge<string>;
+  histogram(opts: PluginHistogramOptions): Histogram<string>;
+}
+\`\`\`
+
+Example:
+
+\`\`\`ts
+const polls = ctx.metrics.counter({ name: "polls_total", help: "Poll attempts", labelNames: ["result"] });
+const pollMs = ctx.metrics.histogram({ name: "poll_duration_ms", help: "Poll duration", buckets: [50, 100, 500, 1000, 5000] });
+
+ctx.scheduler.interval(60_000, async () => {
+  const end = pollMs.startTimer();
+  try { await poll(); polls.inc({ result: "ok" }); }
+  catch { polls.inc({ result: "error" }); }
+  finally { end(); }
+});
+\`\`\`
+
+---
+
 ## Complete annotated example
 
 \`\`\`ts
@@ -427,6 +475,16 @@ COMPLETE + any                       → no-op
 Sessions are recycled (\`hive recycle\`) only when they reach COMPLETE.
 The idle timeout defaults to \`idleTimeoutMs\` in conductor.config.json (default 10 min)
 and can be overridden per plugin entry or per \`newSession\` call.
+
+## Restart recovery
+
+Session state and idle timers are in-memory only. To survive daemon restarts,
+Conductor writes a per-session \`meta.json\` sidecar at creation (\`pluginId\`,
+\`name\`, \`workDir\`, \`idleTimeoutMs\`) and reconciles on startup: sessions hive
+still reports active are re-adopted into IDLE with a fresh idle timer, stale
+session dirs are cleaned up, and IPC signals written while the daemon was down
+are drained rather than stranded. Plugins do not need to do anything to
+participate — newly created sessions are persisted automatically.
 `;
 
 const program = new Command("conductor").description("Poll-driven session orchestrator for hive").version("0.1.0");
