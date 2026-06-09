@@ -12,6 +12,18 @@ export function sessionEventsDir(sessionId: string): string {
   return join(conductorDataDir(), "sessions", sessionId, "events");
 }
 
+export function sessionsRootDir(): string {
+  return join(conductorDataDir(), "sessions");
+}
+
+// Sidecar metadata file (next to the events/ dir) recording the conductor-side
+// attributes hive does not return from `session list` — notably the creating
+// plugin id. Reconciliation reads this after a restart to re-adopt a session
+// faithfully. Kept outside events/ so the IPC drain never tries to parse it.
+export function sessionMetaPath(sessionId: string): string {
+  return join(conductorDataDir(), "sessions", sessionId, "meta.json");
+}
+
 export async function writeIpcEvent(sessionId: string, signal: IpcSignal): Promise<void> {
   const eventsDir = sessionEventsDir(sessionId);
   mkdirSync(eventsDir, { recursive: true });
@@ -99,9 +111,7 @@ export function watchIpcEvents(handler: IpcEventHandler): { stop(): void } {
     }
   };
 
-  const watcher = watch(sessionsDir, { recursive: true }, (_eventType, filename) => {
-    if (!filename) return;
-    if (!filename.endsWith(".json")) return;
+  const triggerDrain = () => {
     if (draining) {
       dirty = true;
       return;
@@ -120,7 +130,19 @@ export function watchIpcEvents(handler: IpcEventHandler): { stop(): void } {
         draining = false;
       }
     })();
+  };
+
+  const watcher = watch(sessionsDir, { recursive: true }, (_eventType, filename) => {
+    if (!filename) return;
+    if (!filename.endsWith(".json")) return;
+    triggerDrain();
   });
+
+  // Drain once on startup: files written while the daemon was down already exist
+  // and will never produce an fs.watch event, so without this their signals (e.g.
+  // a Stop delivered during downtime) would be stranded until the next unrelated
+  // write happened to trigger a scan.
+  triggerDrain();
 
   return { stop: () => watcher.close() };
 }

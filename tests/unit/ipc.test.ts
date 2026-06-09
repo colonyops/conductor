@@ -158,6 +158,30 @@ describe("watchIpcEvents", () => {
     }
   }, 15_000);
 
+  it("drains files that already exist when the watcher starts (downtime recovery)", async () => {
+    // A signal written while the daemon was down produces no fs.watch event, so
+    // the watcher must drain pre-existing files once on startup.
+    const eventsDir = sessionEventsDir("sess-startup-drain");
+    mkdirSync(eventsDir, { recursive: true });
+    await writeIpcEvent("sess-startup-drain", "stop");
+
+    const received: string[] = [];
+    const { stop } = watchIpcEvents(async (event) => {
+      if (event.sessionId === "sess-startup-drain") received.push(event.signal);
+    });
+
+    try {
+      // No further writes — only the startup drain can deliver this.
+      const deadline = Date.now() + 5_000;
+      while (received.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(received).toEqual(["stop"]);
+    } finally {
+      stop();
+    }
+  }, 15_000);
+
   it("does not drop events written while a drain is in progress", async () => {
     // The watcher scans every session dir in the shared test data dir, so
     // filter to this test's session to ignore undrained files from other tests.

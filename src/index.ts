@@ -462,6 +462,17 @@ program
       const { registry, metrics, pluginMetrics } = createMetrics();
       const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
 
+      // Re-adopt sessions that outlived a previous daemon before plugins start
+      // creating new ones, so the in-memory map reflects reality (open-session
+      // caps, idle timers) from the first poll. Never fatal to startup.
+      try {
+        await sessionManager.reconcileSessions();
+      } catch (err) {
+        logger.warn("session reconciliation failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       const registrations = await loadPlugins({
         config,
         configPath,
