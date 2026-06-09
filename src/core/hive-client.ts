@@ -62,14 +62,8 @@ function extractJSON(raw: string): string {
   throw new Error("No JSON object found in hive batch output");
 }
 
-export async function hiveSessionList(tags?: string[]): Promise<HiveSessionRecord[]> {
-  const args = ["hive", "session", "list", "--json"];
-  if (tags) {
-    for (const tag of tags) {
-      args.push("--tags", tag);
-    }
-  }
-  const proc = Bun.spawn(args, {
+export async function hiveSessionList(): Promise<HiveSessionRecord[]> {
+  const proc = Bun.spawn(["hive", "session", "list", "--json"], {
     stdout: "pipe",
     stderr: "pipe",
   });

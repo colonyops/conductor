@@ -1,12 +1,49 @@
-import { mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { ConductorConfig } from "../config.js";
 import type { ConcurrencyLimiter } from "../sdk/concurrency.js";
 import type { Logger } from "../sdk/logger.js";
 import type { Session, SessionEvent, SessionState } from "../types.js";
 import type { EventBus } from "./events.js";
-import { acceptTrustPrompt, hiveNew, hiveRecycle } from "./hive-client.js";
-import { sessionEventsDir } from "./ipc.js";
+import {
+  type HiveSessionRecord,
+  acceptTrustPrompt,
+  deriveWorkDir,
+  hiveNew,
+  hiveRecycle,
+  hiveSessionList,
+} from "./hive-client.js";
+import { sessionEventsDir, sessionMetaPath, sessionsRootDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
+
+// pluginId assigned to a reconciled session when its sidecar meta.json is
+// missing (e.g. it predates metadata persistence). The id is only used to
+// attribute lifecycle events and count a plugin's open sessions, so a recovered
+// session without metadata simply isn't attributed to its original plugin.
+const RECONCILED_PLUGIN_ID = "conductor.reconciled";
+
+// Conductor-side attributes persisted per session so a restarted daemon can
+// re-adopt a session faithfully. `hive session list` does not return these.
+export interface SessionMeta {
+  name: string;
+  pluginId: string;
+  workDir: string;
+  idleTimeoutMs?: number;
+}
+
+export function writeSessionMeta(sessionId: string, meta: SessionMeta): void {
+  const path = sessionMetaPath(sessionId);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(meta, null, 2)}\n`);
+}
+
+export function readSessionMeta(sessionId: string): SessionMeta | undefined {
+  try {
+    return JSON.parse(readFileSync(sessionMetaPath(sessionId), "utf8")) as SessionMeta;
+  } catch {
+    return undefined;
+  }
+}
 
 // ── Hook injection helpers ────────────────────────────────────────────────────
 
@@ -175,6 +212,36 @@ export interface SessionManagerDeps {
   logger?: Logger;
 }
 
+// External lookups reconcileSessions depends on, injectable for testing.
+export interface ReconcileDeps {
+  /** All sessions hive currently knows about (no tag filter — `list` has none). */
+  listAllSessions(): Promise<HiveSessionRecord[]>;
+  /** Conductor-side metadata persisted at creation, if still present. */
+  readMeta(sessionId: string): SessionMeta | undefined;
+  /** Session ids conductor created — those with an on-disk state dir. */
+  listTrackedSessionIds(): string[];
+  removeSessionDir(sessionId: string): void;
+}
+
+const defaultReconcileDeps: ReconcileDeps = {
+  listAllSessions: () => hiveSessionList(),
+  readMeta: readSessionMeta,
+  listTrackedSessionIds: () => {
+    try {
+      return readdirSync(sessionsRootDir());
+    } catch {
+      return [];
+    }
+  },
+  removeSessionDir: (sessionId) => {
+    try {
+      rmSync(`${sessionsRootDir()}/${sessionId}`, { recursive: true, force: true });
+    } catch {
+      // best-effort — ignore unexpected errors
+    }
+  },
+};
+
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -188,6 +255,73 @@ export class SessionManager {
     this.eventBus = deps.eventBus;
     this.globalLimiter = deps.globalLimiter;
     this.logger = deps.logger;
+  }
+
+  // Re-adopts sessions that outlived a previous daemon. Session state and idle
+  // timers live only in memory, so a restart loses the live map: any session
+  // mid-lifecycle would otherwise never reach COMPLETE and never be recycled —
+  // a leak that accumulates across restarts. We drive this from conductor's own
+  // on-disk session dirs (the sessions it created) and cross-reference hive's
+  // live session list: a session hive still reports active is re-adopted into
+  // IDLE with a fresh idle timer (a finished agent then idle-times-out, emits
+  // sessionComplete, and is recycled; an agent still working flips back to
+  // ACTIVE on its next activity signal); a session hive no longer reports active
+  // is stale and its dir is removed.
+  async reconcileSessions(deps: ReconcileDeps = defaultReconcileDeps): Promise<void> {
+    let records: HiveSessionRecord[];
+    try {
+      records = await deps.listAllSessions();
+    } catch (err) {
+      // Without an authoritative list we cannot safely adopt or clean up.
+      this.logger?.warn("session reconciliation skipped: failed to list hive sessions", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    const activeById = new Map<string, HiveSessionRecord>();
+    for (const record of records) {
+      if (record.state === "active") activeById.set(record.id, record);
+    }
+
+    let adopted = 0;
+    let cleaned = 0;
+    for (const id of deps.listTrackedSessionIds()) {
+      if (this.sessions.has(id)) continue;
+
+      const record = activeById.get(id);
+      if (!record) {
+        // Conductor created this session but hive no longer reports it active —
+        // it was recycled or removed out of band. Drop the orphaned state dir.
+        deps.removeSessionDir(id);
+        cleaned++;
+        continue;
+      }
+
+      const meta = deps.readMeta(id);
+      const idleTimeoutMs = meta?.idleTimeoutMs ?? this.config.idleTimeoutMs;
+      const session = applyStateTimestamps(
+        buildSession(
+          id,
+          meta?.name ?? record.name,
+          meta?.pluginId ?? RECONCILED_PLUGIN_ID,
+          meta?.workDir ?? deriveWorkDir(record.repo, id),
+          false,
+          meta?.idleTimeoutMs,
+        ),
+        "IDLE",
+        new Date(),
+      );
+      mkdirSync(sessionEventsDir(id), { recursive: true });
+      this.sessions.set(id, session);
+      this.armIdleTimer(id, idleTimeoutMs);
+      adopted++;
+      this.logger?.info("re-adopted orphaned session", { sessionId: id, name: session.name });
+    }
+
+    if (adopted > 0 || cleaned > 0) {
+      this.logger?.info("session reconciliation complete", { adopted, cleaned });
+    }
   }
 
   async createSession(opts: CreateSessionOptions): Promise<Session> {
@@ -220,6 +354,23 @@ export class SessionManager {
 
       const session = buildSession(id, opts.name, opts.pluginId, workDir, false, opts.idleTimeoutMs);
       this.sessions.set(id, session);
+
+      // Persist the conductor-side attributes so a restarted daemon can re-adopt
+      // this session (see reconcileSessions). Best-effort: a write failure must
+      // not abort session creation.
+      try {
+        writeSessionMeta(id, {
+          name: opts.name,
+          pluginId: opts.pluginId,
+          workDir,
+          ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
+        });
+      } catch (err) {
+        this.logger?.warn("failed to persist session metadata", {
+          sessionId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
       await this.eventBus.emit("sessionCreated", { session });
       return session;
@@ -300,11 +451,7 @@ export class SessionManager {
     for (const action of result.actions) {
       switch (action.type) {
         case "startIdleTimer": {
-          this.cancelIdleTimer(action.sessionId);
-          const timer = setTimeout(() => {
-            void this.applyTransition(action.sessionId, "IdleTimeout");
-          }, action.timeoutMs);
-          this.idleTimers.set(action.sessionId, timer);
+          this.armIdleTimer(action.sessionId, action.timeoutMs);
           break;
         }
         case "cancelIdleTimer": {
@@ -339,6 +486,14 @@ export class SessionManager {
         }
       }
     }
+  }
+
+  private armIdleTimer(sessionId: string, timeoutMs: number): void {
+    this.cancelIdleTimer(sessionId);
+    const timer = setTimeout(() => {
+      void this.applyTransition(sessionId, "IdleTimeout");
+    }, timeoutMs);
+    this.idleTimers.set(sessionId, timer);
   }
 
   private cancelIdleTimer(sessionId: string): void {
