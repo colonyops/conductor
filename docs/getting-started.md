@@ -141,6 +141,20 @@ export default definePlugin({
 });
 ```
 
+### Lifecycle subscriptions
+
+`ctx.hive` exposes all seven session lifecycle events. Each returns an unsubscribe function and is automatically removed when the plugin unloads:
+
+| Subscription | Fires when |
+|---|---|
+| `onSessionCreated` | A session is created |
+| `onSessionActive` | A session enters `ACTIVE` (agent ran a tool) |
+| `onSessionIdle` | A session enters `IDLE` (agent stopped, idle timer running) |
+| `onSessionComplete` | A session reaches `COMPLETE` (about to be recycled) |
+| `onSessionRecycled` | A session has been recycled via `hive recycle` |
+| `onSessionApproval` | A session is blocked in `APPROVAL` awaiting a permission decision |
+| `onSessionError` | A session error occurred (handler also receives `error`) |
+
 ### Register the plugin
 
 Add it to `conductor.config.json`:
@@ -216,8 +230,9 @@ export default definePlugin({
 Secrets are resolved in this order:
 
 1. Environment variable (if `opts.env` is set)
-2. OS keychain (`security` on macOS, `secret-tool` on Linux)
-3. Interactive stdin prompt (only if `opts.promptIfMissing: true`)
+2. `gh auth token` (only if `opts.ghCLI: true`)
+3. OS keychain (`security` on macOS, `secret-tool` on Linux)
+4. Interactive stdin prompt (only if `opts.promptIfMissing: true`)
 
 ```ts
 // From environment variable GITHUB_TOKEN, falling back to keychain
@@ -283,11 +298,11 @@ Conductor writes these hooks automatically when it creates a session via `hive`.
 
 ### Signal types
 
-| Signal | CLI flag | When emitted |
+| Signal | CLI invocation | When emitted |
 |---|---|---|
-| `activity` | `conductor signal activity` | Every Claude Code tool use (PostToolUse hook) |
-| `stop` | `conductor signal stop` | Claude Code session stops cleanly |
-| `stop:approval` | `conductor signal stop --approval` | Claude Code paused waiting for a permission approval |
+| `activity` | `conductor signal activity --session <id>` | Every Claude Code tool use (PostToolUse hook) |
+| `stop` | `conductor signal stop --session <id>` | Claude Code session stops cleanly |
+| `stop:approval` | `conductor signal stop:approval --session <id>` | Claude Code paused waiting for a permission approval |
 
 ### Idle timeout
 
@@ -304,6 +319,49 @@ When a session reaches `IDLE`, a timer starts. If no new signal arrives within `
   ]
 }
 ```
+
+### Restart recovery
+
+Session state and idle timers live only in memory, so a daemon restart would otherwise orphan any in-flight session — leaking tmux/agent processes that never reach `COMPLETE`. Conductor avoids this by persisting a `meta.json` sidecar per session at creation (recording `pluginId`, `name`, `workDir`, `idleTimeoutMs`) and reconciling on startup:
+
+- Sessions hive still reports `active` are re-adopted into `IDLE` with a fresh idle timer. A finished agent then idle-times-out to `COMPLETE` and is recycled; an agent still working flips back to `ACTIVE` on its next signal.
+- Tracked session directories hive no longer reports are stale and are cleaned up.
+- IPC signals written while the daemon was down are drained on startup, not stranded.
+
+Reconciliation runs before plugins begin polling, so per-plugin `maxOpenSessions`/`concurrencyLimit` counts and idle timers reflect reality immediately. A reconciled session whose `meta.json` is missing (e.g. it predates the sidecar) is still re-adopted, but attributed to a fallback plugin id rather than its original plugin.
+
+### Handling the APPROVAL state
+
+When a session pauses for a permission decision it enters `APPROVAL`. Subscribe with `onSessionApproval` to react — notify a human, log it, or resolve it out of band:
+
+```ts
+ctx.hive.onSessionApproval(async ({ session }) => {
+  ctx.logger.warn("session waiting on approval", { id: session.id, name: session.name });
+  // e.g. post to Slack, page a human, or auto-approve via your own tooling
+});
+```
+
+The session leaves `APPROVAL` and returns to `ACTIVE` on the next `activity` signal (the agent resumed) or an `ApprovalResolved` signal.
+
+### Rate-limiting with `maxOpenSessions`
+
+To stop a plugin from spawning unbounded concurrent sessions, cap its open sessions and check the count before creating new ones. The built-in `github-issues` plugin does this via the `maxOpenSessions` config field; a custom plugin can do the same with `ctx.hive.listSessions()`:
+
+```ts
+const MAX_OPEN = 3;
+
+ctx.scheduler.interval(60_000, async () => {
+  for (const item of await fetchWork()) {
+    const open = ctx.hive.listSessions().filter((s) => s.pluginId === "my-org.my-plugin").length;
+    if (open >= MAX_OPEN) break; // defer the rest to the next poll
+    if (await ctx.kv.has(`seen:${item.id}`)) continue;
+    await ctx.kv.set(`seen:${item.id}`, { createdAt: new Date().toISOString() });
+    await ctx.hive.newSession({ name: `work-${item.id}`, remote, context: item.body });
+  }
+});
+```
+
+Alternatively, set `concurrencyLimit` on the plugin's config entry to have Conductor queue `newSession()` calls past the limit instead of skipping them.
 
 ---
 
@@ -351,7 +409,7 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
 
 ### Built-in: `github-issues`
 
-The `github-issues` built-in polls a GitHub repository for matching issues and creates one session per issue. Issues are closed when the session completes.
+The `github-issues` built-in polls a GitHub repository for matching issues and creates one session per issue. When a session completes, the plugin adds `doneLabel` (if set) and **leaves the issue open** — a finished session means a PR is up for review, not that the work is closed out.
 
 ```json
 {
@@ -360,6 +418,8 @@ The `github-issues` built-in polls a GitHub repository for matching issues and c
       "repo": "owner/repo",
       "labels": ["conductor"],
       "pollIntervalMs": 300000,
+      "assignee": "my-bot",
+      "maxOpenSessions": 3,
       "inProgressLabel": "conductor/in-progress",
       "doneLabel": "conductor/done",
       "tokenSecretKey": "github.token",
@@ -374,10 +434,14 @@ The `github-issues` built-in polls a GitHub repository for matching issues and c
 | `repo` | `string` | required | GitHub repository in `owner/repo` format |
 | `labels` | `string[]` | required | Issues must have all of these labels to be picked up |
 | `pollIntervalMs` | `number` | `300000` | How often to poll (ms) |
+| `assignee` | `string` | — | If set, only issues assigned to this user are picked up |
+| `maxOpenSessions` | `number` | — | Cap on concurrent sessions this plugin holds; further issues are deferred to later polls |
 | `inProgressLabel` | `string` | — | Label added to an issue when its session starts |
 | `doneLabel` | `string` | — | Label added to an issue when its session completes |
-| `tokenSecretKey` | `string` | `"github.token"` | Keychain key used to look up the GitHub token |
-| `tokenSource` | `string` | — | Set to `"gh-cli"` to use `gh auth token` instead of the keychain |
+| `tokenSecretKey` | `string` | `"github.token"` | Secret key used to look up the GitHub token |
+| `tokenSource` | `"secret"` \| `"gh-cli"` | `"secret"` | `"secret"` resolves via env/keychain; `"gh-cli"` uses `gh auth token` |
+
+**Deduplication.** The plugin writes a persistent `seen:<issueId>` marker to its KV store *before* spawning a session and keeps it for the lifetime of the open issue — it is not cleared when the session completes. This stops a completed-but-still-open issue (PR review pending) from being picked up again on the next poll. `maxOpenSessions` caps how many sessions run concurrently; when the cap is hit, remaining issues wait for a later poll.
 
 ### Prompt templates
 
@@ -433,7 +497,19 @@ Also verify that the Claude Code hooks are writing signals. Check:
 ls ~/.local/conductor/sessions/<session-id>/events/
 ```
 
-You should see `.json` files created by the hooks.
+You should see `.json` files created by the hooks (processed ones are renamed to `.json.processed`). The directory also holds a `meta.json` sidecar used for restart recovery.
+
+If the daemon was restarted while a session was mid-flight, it is re-adopted into `IDLE` with a fresh idle timer during startup reconciliation — so a session can take up to one additional `idleTimeoutMs` to reach `COMPLETE` after a restart. Look for `re-adopted orphaned session` and `session reconciliation complete` log lines. Signals delivered while the daemon was down are drained on startup, so they are not lost across a restart.
+
+### Session blocked on the trust dialog
+
+Claude Code shows a first-run trust/safety dialog the first time it opens an untrusted folder, and Conductor accepts it automatically by polling the session's tmux panes. If a session emits no signals and never goes `ACTIVE`, attach to its tmux session and check whether a trust prompt is still on screen:
+
+```bash
+tmux attach -t <session-name>
+```
+
+Detection is content-based and matches the dialog wording across Claude Code versions, and it runs even under `--dangerously-skip-permissions` (the dialog precedes bypass mode). If a prompt is detected but cannot be dismissed, Conductor emits a `sessionError`, recycles the session, and rethrows so the plugin can back off — check the logs for the error. A session that shows neither a prompt nor a running REPL within the poll window is assumed already-trusted and allowed to proceed.
 
 ### Metrics endpoint unreachable
 

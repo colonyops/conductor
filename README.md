@@ -31,6 +31,20 @@ COMPLETE + any                       → no-op
 
 Sessions are recycled (cleaned up via `hive recycle`) only when they reach `COMPLETE`.
 
+### Restart recovery
+
+Session state and idle timers live only in memory. To survive daemon restarts, Conductor writes a per-session `meta.json` sidecar at creation time (recording `pluginId`, `name`, `workDir`, and `idleTimeoutMs`) and reconciles on startup:
+
+- Sessions that hive still reports `active` are re-adopted into `IDLE` with a fresh idle timer. A finished agent then idle-times-out to `COMPLETE` and is recycled; an agent still working flips back to `ACTIVE` on its next activity signal.
+- Tracked session directories that hive no longer reports are treated as stale and cleaned up.
+- IPC signals written while the daemon was down (e.g. a `Stop` delivered during a restart) are drained on startup rather than stranded until the next unrelated write.
+
+Reconciliation runs before plugins start, so open-session caps and idle timers reflect reality from the first poll. It is never fatal to startup — a failure to list hive sessions is logged and skipped.
+
+### Trust dialog
+
+Claude Code shows a first-run trust/safety dialog the first time it opens an untrusted folder. Conductor accepts it automatically by polling the session's tmux panes and dismissing the dialog (then confirming it actually cleared). Detection is **content-based**: the agent window is not assumed to be named `claude`, so it works regardless of which agent command hive launches. The dialog appears even under `--dangerously-skip-permissions` (it precedes bypass mode), and its wording is matched across Claude Code versions.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime
@@ -111,10 +125,12 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
       "repo": "owner/repo",
       "labels": ["conductor"],
       "pollIntervalMs": 300000,
-      "cloneStrategy": "full",
+      "assignee": "my-bot",
+      "maxOpenSessions": 3,
       "inProgressLabel": "in-progress",
       "doneLabel": "done",
-      "tokenSecretKey": "github.token"
+      "tokenSecretKey": "github.token",
+      "tokenSource": "secret"
     }
   }
 }
@@ -189,15 +205,74 @@ Register it in `conductor.config.json`:
 }
 ```
 
-On first load, Conductor will compute a SHA-256 hash of the file and prompt you to approve it. Approved hashes are written back to `trustedPlugins` in your config.
+### Plugin context
+
+`init(ctx)` receives a single `PluginContext` with these services:
+
+| Service | Purpose |
+|---|---|
+| `ctx.kv` | Per-plugin persistent key-value store (SQLite-backed) |
+| `ctx.hive` | Create sessions and subscribe to lifecycle events |
+| `ctx.secrets` | Resolve secrets from env var, `gh` CLI, OS keychain, or interactive prompt |
+| `ctx.scheduler` | Register recurring `interval()` and daily `schedule()` jobs |
+| `ctx.logger` | Structured logger; lines are tagged with the plugin `name` |
+| `ctx.http` | HTTP client with bearer/interceptor support and request logging |
+| `ctx.metrics` | Register plugin-namespaced Prometheus metrics (see [Observability](#observability)) |
+
+### Lifecycle subscriptions
+
+`ctx.hive` exposes all seven session lifecycle events. Each returns an unsubscribe function and is automatically torn down when the plugin unloads:
+
+| Subscription | Fires when |
+|---|---|
+| `onSessionCreated` | A session is created |
+| `onSessionActive` | A session enters `ACTIVE` (agent ran a tool) |
+| `onSessionIdle` | A session enters `IDLE` (agent stopped, idle timer running) |
+| `onSessionComplete` | A session reaches `COMPLETE` (about to be recycled) |
+| `onSessionRecycled` | A session has been recycled via `hive recycle` |
+| `onSessionApproval` | A session is blocked in `APPROVAL` awaiting a permission decision |
+| `onSessionError` | A session error occurred (handler also receives the `error`) |
+
+```ts
+ctx.hive.onSessionApproval(async ({ session }) => {
+  ctx.logger.warn("session needs approval", { id: session.id });
+  // notify a human, auto-approve out of band, etc.
+});
+
+ctx.hive.onSessionError(async ({ session, error }) => {
+  ctx.logger.error("session error", { id: session.id, error: error.message });
+});
+```
+
+### Trust model
+
+Conductor verifies a plugin's SHA-256 hash **before** importing the module (importing executes its top-level code, so trust must be established from the file bytes first). The trust prompt identifies a plugin by **path and hash only** — the `name`/`id` come from inside the unverified module and are not shown.
+
+On first load, Conductor computes the hash and prompts you to approve it; approved hashes are written back to `trustedPlugins` in your config (keyed by the config-declared `path`). If the file changes, the hash no longer matches and you are re-prompted on the next startup. Built-in plugins skip the trust check.
 
 ## Built-in plugins
 
 ### `github-issues`
 
-Polls GitHub Issues, creates a hive session per matching issue, and closes the issue when the session completes.
+Polls GitHub Issues and creates one hive session per matching issue. When a session completes, the plugin adds `doneLabel` (if configured) and **leaves the issue open** — the session finishing means the agent opened a PR, which still needs review, so the issue is not closed.
 
-Configure via `builtins["github-issues"]` in `conductor.config.json` (see example above). The GitHub token is resolved from the `github.token` OS keychain entry or the `GITHUB_TOKEN` environment variable.
+Configure via `builtins["github-issues"]` in `conductor.config.json`:
+
+| Field | Default | Description |
+|---|---|---|
+| `repo` | required | GitHub repository in `owner/repo` format |
+| `labels` | required | Issues must carry all of these labels to be picked up |
+| `pollIntervalMs` | `300000` | How often to poll, in ms |
+| `assignee` | — | If set, only issues assigned to this user are picked up |
+| `maxOpenSessions` | — | Cap on concurrent sessions this plugin holds; further issues are deferred to later polls |
+| `inProgressLabel` | — | Label added to an issue when its session starts |
+| `doneLabel` | — | Label added to an issue when its session completes |
+| `tokenSecretKey` | `"github.token"` | Secret key used to resolve the GitHub token |
+| `tokenSource` | `"secret"` | `"secret"` resolves via env/keychain; `"gh-cli"` uses `gh auth token` |
+
+The GitHub token is resolved from the `GITHUB_TOKEN` environment variable, then the `tokenSecretKey` OS keychain entry — or from `gh auth token` when `tokenSource` is `"gh-cli"`.
+
+**Deduplication.** A persistent `seen:<issueId>` KV marker is written **before** a session is spawned and is kept for the lifetime of the open issue (it is *not* removed when the session completes). This prevents re-spawning a session for a completed-but-still-open issue on the next poll. A caught `newSession()` failure removes the marker so the issue can be retried. `maxOpenSessions` caps how many sessions the plugin runs at once.
 
 ## Observability
 
@@ -217,6 +292,8 @@ Available metrics:
 | `conductor_concurrency_active` | Active concurrency slots |
 | `conductor_concurrency_waiting` | Queued concurrency waiters |
 | `conductor_secrets_resolution_total` | Secret resolution attempts |
+
+Plugins can register their own custom metrics through `ctx.metrics` (`counter`, `gauge`, `histogram`). Each is automatically namespaced `conductor_plugin_<plugin_id>_<name>` so plugins can never collide, and they render at the same `/metrics` endpoint. See the [Observability Guide](docs/observability.md#plugin-metrics) for the full API and naming rules.
 
 Logs are newline-delimited JSON written to `observability.logPath`, with automatic rotation at `logMaxBytes`.
 
