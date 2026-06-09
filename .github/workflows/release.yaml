@@ -111,7 +111,7 @@ jobs:
       - name: Build bundle
         run: |
           mkdir -p dist
-          bun build src/index.ts --outfile dist/conductor.js
+          bun build src/index.ts --target bun --outfile dist/conductor.js
           tar -czf dist/conductor.tar.gz -C dist conductor.js
 
       - name: Create GitHub release
