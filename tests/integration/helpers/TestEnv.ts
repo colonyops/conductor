@@ -159,6 +159,8 @@ export class TestEnv {
         logMaxBackups: 5,
         logFormat: "json" as const,
         logCaller: false,
+        sessionInventoryIntervalMs: 120_000,
+        signalStallWarnMs: 300_000,
       },
       idleTimeoutMs: this.opts.idleTimeoutMs ?? 60_000,
       builtins: {},

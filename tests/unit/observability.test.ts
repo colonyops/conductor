@@ -6,6 +6,11 @@ describe("createMetrics", () => {
     expect(registry).toBeDefined();
     expect(metrics.sessionsTotal).toBeDefined();
     expect(metrics.sessionsActive).toBeDefined();
+    expect(metrics.sessionsCompleted).toBeDefined();
+    expect(metrics.sessionsReaped).toBeDefined();
+    expect(metrics.idleTimeoutsFired).toBeDefined();
+    expect(metrics.oldestSessionAge).toBeDefined();
+    expect(metrics.signalsReceived).toBeDefined();
     expect(metrics.pluginInitDuration).toBeDefined();
     expect(metrics.pluginErrors).toBeDefined();
     expect(metrics.schedulerRuns).toBeDefined();
@@ -14,6 +19,25 @@ describe("createMetrics", () => {
     expect(metrics.concurrencyActive).toBeDefined();
     expect(metrics.concurrencyWaiting).toBeDefined();
     expect(metrics.secretsResolutionTotal).toBeDefined();
+  });
+
+  it("tracks signals received by type and result", async () => {
+    const { registry, metrics } = createMetrics();
+    metrics.signalsReceived.inc({ type: "activity", result: "ok" });
+    metrics.signalsReceived.inc({ type: "activity", result: "ok" });
+    metrics.signalsReceived.inc({ type: "stop", result: "error" });
+
+    const text = await registry.metrics();
+    expect(text).toContain('conductor_signals_received_total{type="activity",result="ok"} 2');
+    expect(text).toContain('conductor_signals_received_total{type="stop",result="error"} 1');
+  });
+
+  it("exposes the oldest-session-age gauge", async () => {
+    const { registry, metrics } = createMetrics();
+    metrics.oldestSessionAge.set(615);
+
+    const text = await registry.metrics();
+    expect(text).toContain("conductor_oldest_session_age_seconds 615");
   });
 
   it("returns a working pluginMetrics factory", () => {
@@ -76,6 +100,11 @@ describe("createMetrics", () => {
       "conductor_scheduler_runs_total",
       "conductor_scheduler_run_duration_ms",
       "conductor_ipc_events_total",
+      "conductor_sessions_completed_total",
+      "conductor_sessions_reaped_total",
+      "conductor_idle_timeouts_fired_total",
+      "conductor_oldest_session_age_seconds",
+      "conductor_signals_received_total",
       "conductor_concurrency_active",
       "conductor_concurrency_waiting",
       "conductor_secrets_resolution_total",

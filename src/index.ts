@@ -4,7 +4,7 @@ import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
 import { EventBus } from "./core/events.js";
 import { conductorDataDir, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
 import { createMetrics, startMetricsServer } from "./core/observability.js";
-import { SessionManager } from "./core/session.js";
+import { SessionManager, resolveSignalInvocation } from "./core/session.js";
 import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
 import type { PluginRegistration } from "./plugins/loader.js";
 import { createConcurrencyLimiter } from "./sdk/concurrency.js";
@@ -510,15 +510,22 @@ program
       const secrets = createSecretsClient();
       const eventBus = new EventBus(logger.with({ component: "eventbus" }));
       const globalLimiter = createConcurrencyLimiter(config.concurrency.global);
+
+      const { registry, metrics, pluginMetrics } = createMetrics();
+      const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
+
       const sessionManager = new SessionManager({
         config,
         eventBus,
         globalLimiter,
         logger,
+        metrics,
       });
 
-      const { registry, metrics, pluginMetrics } = createMetrics();
-      const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
+      // Record the exact command the injected hooks will run. A bare `bun` with
+      // no script path here is the fingerprint of the signal-hook failure that
+      // motivated this logging — it pinpoints the bug without scraping a pane.
+      logger.info("signal invocation resolved", { invocation: resolveSignalInvocation() });
 
       // Re-adopt sessions that outlived a previous daemon before plugins start
       // creating new ones, so the in-memory map reflects reality (open-session
@@ -546,10 +553,19 @@ program
         metrics.ipcEventsTotal.inc({ signal: ipcEvent.signal });
         const isApproval = isApprovalSignal(ipcEvent.signal);
         const event: SessionEvent = ipcEvent.signal === "activity" ? "PostToolUse" : "Stop";
-        await sessionManager.applyTransition(ipcEvent.sessionId, event, {
+        const outcome = await sessionManager.applyTransition(ipcEvent.sessionId, event, {
           isApprovalPending: isApproval,
         });
+        // type collapses the wire signal to activity|stop (stop:approval is a
+        // stop); result=ok only when the signal actually drove a tracked session.
+        const type = ipcEvent.signal === "activity" ? "activity" : "stop";
+        metrics.signalsReceived.inc({ type, result: outcome === "applied" ? "ok" : "error" });
       });
+
+      sessionManager.startMonitor(
+        config.observability.sessionInventoryIntervalMs,
+        config.observability.signalStallWarnMs,
+      );
 
       let shuttingDown = false;
       const handleSignal = () => {

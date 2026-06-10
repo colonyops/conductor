@@ -18,6 +18,22 @@ describe("validateConfig", () => {
     expect(config.builtins).toEqual({});
   });
 
+  it("defaults the session-monitor observability options", () => {
+    const { config, errors } = validateConfig({});
+    expect(errors).toHaveLength(0);
+    expect(config.observability.sessionInventoryIntervalMs).toBe(120_000);
+    expect(config.observability.signalStallWarnMs).toBe(300_000);
+  });
+
+  it("rejects non-positive session-monitor options", () => {
+    const { errors } = validateConfig({
+      observability: { sessionInventoryIntervalMs: 0, signalStallWarnMs: -1 },
+    });
+    const fields = errors.map((e) => e.field);
+    expect(fields).toContain("observability.sessionInventoryIntervalMs");
+    expect(fields).toContain("observability.signalStallWarnMs");
+  });
+
   it("merges partial config with defaults", () => {
     const { config, errors } = validateConfig({ idleTimeoutMs: 30_000 });
     expect(errors).toHaveLength(0);

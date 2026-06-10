@@ -15,6 +15,7 @@ import {
 } from "./hive-client.js";
 import { sessionEventsDir, sessionMetaPath, sessionsRootDir } from "./ipc.js";
 import { type TransitionOpts, transition } from "./lifecycle.js";
+import type { ConductorMetrics } from "./observability.js";
 
 // pluginId assigned to a reconciled session when its sidecar meta.json is
 // missing (e.g. it predates metadata persistence). The id is only used to
@@ -192,6 +193,52 @@ export function applyStateTimestamps(session: Session, nextState: SessionState, 
   return { ...session, state: nextState };
 }
 
+// ── Session monitor helpers ───────────────────────────────────────────────────
+
+/** One row of the periodic session inventory: enough to spot a wedged session. */
+export interface SessionInventoryEntry {
+  id: string;
+  name: string;
+  state: SessionState;
+  ageSeconds: number;
+}
+
+/** Age of `session` in whole seconds relative to `now`. */
+function sessionAgeSeconds(session: Session, now: Date): number {
+  return Math.max(0, Math.round((now.getTime() - session.createdAt.getTime()) / 1000));
+}
+
+/** Inventory snapshot of every tracked session — id, state, and age. */
+export function buildSessionInventory(sessions: Session[], now: Date): SessionInventoryEntry[] {
+  return sessions.map((s) => ({
+    id: s.id,
+    name: s.name,
+    state: s.state,
+    ageSeconds: sessionAgeSeconds(s, now),
+  }));
+}
+
+/** Age of the oldest session in seconds, or 0 when there are none. */
+export function oldestSessionAgeSeconds(sessions: Session[], now: Date): number {
+  let oldest = 0;
+  for (const s of sessions) {
+    const age = sessionAgeSeconds(s, now);
+    if (age > oldest) oldest = age;
+  }
+  return oldest;
+}
+
+/**
+ * Sessions still in CREATED past `stallWarnMs` — i.e. conductor spawned the
+ * agent but never saw its first `activity` signal. This is exactly the silent
+ * failure mode where a broken signal hook leaves sessions wedged forever; every
+ * other state legitimately sees gaps between signals (an IDLE session is just
+ * waiting to time out), so the stall check is scoped to CREATED only.
+ */
+export function stalledCreatedSessions(sessions: Session[], stallWarnMs: number, now: Date): Session[] {
+  return sessions.filter((s) => s.state === "CREATED" && now.getTime() - s.createdAt.getTime() >= stallWarnMs);
+}
+
 // ── SessionManager ────────────────────────────────────────────────────────────
 
 export interface CreateSessionOptions {
@@ -210,7 +257,15 @@ export interface SessionManagerDeps {
   eventBus: EventBus;
   globalLimiter: ConcurrencyLimiter;
   logger?: Logger;
+  metrics?: ConductorMetrics;
 }
+
+/**
+ * Result of applying an external lifecycle signal to a session. `applied` means
+ * the state machine ran (the state may or may not have changed); the error
+ * results let the IPC boundary record a signal that landed nowhere useful.
+ */
+export type ApplyOutcome = "applied" | "unknown-session" | "invalid";
 
 // External lookups reconcileSessions depends on, injectable for testing.
 export interface ReconcileDeps {
@@ -245,16 +300,35 @@ const defaultReconcileDeps: ReconcileDeps = {
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Sessions already warned about for a missing first signal, so the periodic
+  // monitor warns once per stall episode rather than on every tick.
+  private warnedStall = new Set<string>();
+  private monitorTimer: ReturnType<typeof setInterval> | undefined;
   private readonly config: ConductorConfig;
   private readonly eventBus: EventBus;
   private readonly globalLimiter: ConcurrencyLimiter;
   private readonly logger: Logger | undefined;
+  private readonly metrics: ConductorMetrics | undefined;
 
   constructor(deps: SessionManagerDeps) {
     this.config = deps.config;
     this.eventBus = deps.eventBus;
     this.globalLimiter = deps.globalLimiter;
     this.logger = deps.logger;
+    this.metrics = deps.metrics;
+  }
+
+  // Recomputes the by-state session gauge from the live map. Cheap (the map is
+  // small) and immune to the dec/inc drift that hand-tracked gauges accumulate.
+  private syncStateGauge(): void {
+    if (!this.metrics) return;
+    const counts: Record<SessionState, number> = { CREATED: 0, ACTIVE: 0, IDLE: 0, APPROVAL: 0, COMPLETE: 0 };
+    for (const session of this.sessions.values()) {
+      counts[session.state]++;
+    }
+    for (const state of Object.keys(counts) as SessionState[]) {
+      this.metrics.sessionsActive.set({ state }, counts[state]);
+    }
   }
 
   // Re-adopts sessions that outlived a previous daemon. Session state and idle
@@ -314,6 +388,7 @@ export class SessionManager {
       );
       mkdirSync(sessionEventsDir(id), { recursive: true });
       this.sessions.set(id, session);
+      this.metrics?.sessionsTotal.inc({ state: session.state, plugin_id: session.pluginId });
       this.armIdleTimer(id, idleTimeoutMs);
       adopted++;
       this.logger?.info("re-adopted orphaned session", { sessionId: id, name: session.name });
@@ -322,6 +397,7 @@ export class SessionManager {
     if (adopted > 0 || cleaned > 0) {
       this.logger?.info("session reconciliation complete", { adopted, cleaned });
     }
+    this.syncStateGauge();
   }
 
   async createSession(opts: CreateSessionOptions): Promise<Session> {
@@ -354,6 +430,8 @@ export class SessionManager {
 
       const session = buildSession(id, opts.name, opts.pluginId, workDir, false, opts.idleTimeoutMs);
       this.sessions.set(id, session);
+      this.metrics?.sessionsTotal.inc({ state: session.state, plugin_id: session.pluginId });
+      this.syncStateGauge();
 
       // Persist the conductor-side attributes so a restarted daemon can re-adopt
       // this session (see reconcileSessions). Best-effort: a write failure must
@@ -422,9 +500,15 @@ export class SessionManager {
     sessionId: string,
     event: SessionEvent,
     opts: Pick<TransitionOpts, "isApprovalPending"> = {},
-  ): Promise<void> {
+  ): Promise<ApplyOutcome> {
     const session = this.sessions.get(sessionId);
-    if (!session) return;
+    if (!session) {
+      // A signal for a session we don't track — the hook is wired to a stale or
+      // unknown id, or the daemon restarted without re-adopting it. Surface it
+      // rather than dropping it silently.
+      this.logger?.warn("signal for unknown session", { sessionId, event });
+      return "unknown-session";
+    }
 
     const idleTimeoutMs = session.idleTimeoutMs ?? this.config.idleTimeoutMs;
 
@@ -432,7 +516,19 @@ export class SessionManager {
     if (opts.isApprovalPending !== undefined) {
       transitionOpts.isApprovalPending = opts.isApprovalPending;
     }
-    const result = transition(session, event, transitionOpts);
+
+    let result: ReturnType<typeof transition>;
+    try {
+      result = transition(session, event, transitionOpts);
+    } catch (err) {
+      this.logger?.warn("invalid session transition", {
+        sessionId,
+        state: session.state,
+        event,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return "invalid";
+    }
 
     if (result.nextState !== session.state) {
       this.logger?.info("session state transition", {
@@ -441,11 +537,16 @@ export class SessionManager {
         to: result.nextState,
         event,
       });
+      this.metrics?.sessionsTotal.inc({ state: result.nextState, plugin_id: session.pluginId });
+      if (result.nextState === "COMPLETE") {
+        this.metrics?.sessionsCompleted.inc({ plugin_id: session.pluginId });
+      }
     }
 
     // Update session state in place, stamping active/idle timestamps on entry.
     const updatedSession = applyStateTimestamps(session, result.nextState, new Date());
     this.sessions.set(sessionId, updatedSession);
+    this.syncStateGauge();
 
     // Execute side effects in order
     for (const action of result.actions) {
@@ -486,11 +587,17 @@ export class SessionManager {
         }
       }
     }
+
+    return "applied";
   }
 
   private armIdleTimer(sessionId: string, timeoutMs: number): void {
     this.cancelIdleTimer(sessionId);
     const timer = setTimeout(() => {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        this.metrics?.idleTimeoutsFired.inc({ plugin_id: session.pluginId });
+      }
       void this.applyTransition(sessionId, "IdleTimeout");
     }, timeoutMs);
     this.idleTimers.set(sessionId, timer);
@@ -507,8 +614,10 @@ export class SessionManager {
   private async recycleSession(session: Session): Promise<void> {
     try {
       await hiveRecycle(session.id);
+      this.metrics?.sessionsReaped.inc({ plugin_id: session.pluginId, result: "ok" });
       await this.eventBus.emit("sessionRecycled", { session });
     } catch (err) {
+      this.metrics?.sessionsReaped.inc({ plugin_id: session.pluginId, result: "error" });
       await this.eventBus.emit("sessionError", {
         session,
         error: err instanceof Error ? err : new Error(String(err)),
@@ -516,6 +625,8 @@ export class SessionManager {
     } finally {
       this.sessions.delete(session.id);
       this.cancelIdleTimer(session.id);
+      this.warnedStall.delete(session.id);
+      this.syncStateGauge();
       // Delete only the events subdir so a reused session ID starts clean.
       // Runs in finally to guarantee cleanup even when hiveRecycle throws.
       try {
@@ -526,8 +637,62 @@ export class SessionManager {
     }
   }
 
-  /** Cancel all idle timers — called on daemon shutdown. */
+  /**
+   * Arm the periodic session monitor: every `intervalMs` it logs a full session
+   * inventory, refreshes the oldest-session-age gauge, and warns (once) about
+   * any session wedged in CREATED past `stallWarnMs` without its first signal.
+   * Replaces any prior monitor. The timer is unref'd so it never keeps the
+   * process alive on its own.
+   */
+  startMonitor(intervalMs: number, stallWarnMs: number): void {
+    this.stopMonitor();
+    const timer = setInterval(() => this.monitorTick(stallWarnMs), intervalMs);
+    timer.unref?.();
+    this.monitorTimer = timer;
+  }
+
+  private stopMonitor(): void {
+    if (this.monitorTimer !== undefined) {
+      clearInterval(this.monitorTimer);
+      this.monitorTimer = undefined;
+    }
+  }
+
+  // One monitor pass. Public for direct, deterministic testing with an injected
+  // clock; production calls it from the interval armed by startMonitor.
+  monitorTick(stallWarnMs: number, now: Date = new Date()): void {
+    const sessions = this.listSessions();
+    this.metrics?.oldestSessionAge.set(oldestSessionAgeSeconds(sessions, now));
+
+    if (sessions.length > 0) {
+      this.logger?.info("session inventory", {
+        count: sessions.length,
+        sessions: buildSessionInventory(sessions, now),
+      });
+    }
+
+    const stalled = stalledCreatedSessions(sessions, stallWarnMs, now);
+    const stalledIds = new Set(stalled.map((s) => s.id));
+    for (const session of stalled) {
+      if (this.warnedStall.has(session.id)) continue;
+      this.warnedStall.add(session.id);
+      this.logger?.warn("no signal received for session", {
+        sessionId: session.id,
+        name: session.name,
+        state: session.state,
+        ageMinutes: Math.round(sessionAgeSeconds(session, now) / 60),
+      });
+    }
+    // Drop warn flags for sessions that recovered or were removed, so a future
+    // stall warns again.
+    for (const id of this.warnedStall) {
+      if (!stalledIds.has(id)) this.warnedStall.delete(id);
+    }
+  }
+
+  /** Cancel all idle timers and the monitor — called on daemon shutdown. */
   shutdown(): void {
+    this.stopMonitor();
     for (const sessionId of this.idleTimers.keys()) {
       this.cancelIdleTimer(sessionId);
     }

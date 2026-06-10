@@ -37,6 +37,10 @@ export interface ConductorConfig {
     logMaxBackups: number;
     logFormat: LogFormat;
     logCaller: boolean;
+    /** Interval between periodic session-inventory log lines + age-gauge refresh. */
+    sessionInventoryIntervalMs: number;
+    /** A session wedged in CREATED this long without its first signal is warned about. */
+    signalStallWarnMs: number;
   };
   idleTimeoutMs: number;
   prePromptTemplate?: string;
@@ -59,6 +63,8 @@ export const CONFIG_DEFAULTS: ConductorConfig = {
     logMaxBackups: 5,
     logFormat: "json" as LogFormat,
     logCaller: false,
+    sessionInventoryIntervalMs: 120_000,
+    signalStallWarnMs: 300_000,
   },
   idleTimeoutMs: 600_000,
   builtins: {},
@@ -271,6 +277,24 @@ export function validateConfig(raw: unknown): {
         errors.push({
           field: "observability.logCaller",
           message: "must be a boolean",
+        });
+      }
+      if (
+        obs.sessionInventoryIntervalMs !== undefined &&
+        (typeof obs.sessionInventoryIntervalMs !== "number" || obs.sessionInventoryIntervalMs <= 0)
+      ) {
+        errors.push({
+          field: "observability.sessionInventoryIntervalMs",
+          message: "must be a positive number",
+        });
+      }
+      if (
+        obs.signalStallWarnMs !== undefined &&
+        (typeof obs.signalStallWarnMs !== "number" || obs.signalStallWarnMs <= 0)
+      ) {
+        errors.push({
+          field: "observability.signalStallWarnMs",
+          message: "must be a positive number",
         });
       }
     }

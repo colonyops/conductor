@@ -136,6 +136,11 @@ export function createPluginMetricsFactory(registry: Registry): PluginMetricsFac
 export interface ConductorMetrics {
   sessionsTotal: Counter<"state" | "plugin_id">;
   sessionsActive: Gauge<"state">;
+  sessionsCompleted: Counter<"plugin_id">;
+  sessionsReaped: Counter<"plugin_id" | "result">;
+  idleTimeoutsFired: Counter<"plugin_id">;
+  oldestSessionAge: Gauge<string>;
+  signalsReceived: Counter<"type" | "result">;
   pluginInitDuration: Histogram<"plugin_id">;
   pluginErrors: Counter<"plugin_id" | "type">;
   schedulerRuns: Counter<"plugin_id" | "job_type">;
@@ -164,6 +169,40 @@ export function createMetrics(): {
     name: "conductor_sessions_active",
     help: "Current session count by state",
     labelNames: ["state"] as const,
+    registers: [registry],
+  });
+
+  const sessionsCompleted = new Counter({
+    name: "conductor_sessions_completed_total",
+    help: "Sessions that reached COMPLETE (finished their lifecycle)",
+    labelNames: ["plugin_id"] as const,
+    registers: [registry],
+  });
+
+  const sessionsReaped = new Counter({
+    name: "conductor_sessions_reaped_total",
+    help: "Session recycle (hive recycle) attempts by result",
+    labelNames: ["plugin_id", "result"] as const,
+    registers: [registry],
+  });
+
+  const idleTimeoutsFired = new Counter({
+    name: "conductor_idle_timeouts_fired_total",
+    help: "Idle timers that fired, by owning plugin",
+    labelNames: ["plugin_id"] as const,
+    registers: [registry],
+  });
+
+  const oldestSessionAge = new Gauge({
+    name: "conductor_oldest_session_age_seconds",
+    help: "Age of the oldest currently-tracked session in seconds (0 when none)",
+    registers: [registry],
+  });
+
+  const signalsReceived = new Counter({
+    name: "conductor_signals_received_total",
+    help: "Lifecycle signals received from agent hooks, by type and apply result",
+    labelNames: ["type", "result"] as const,
     registers: [registry],
   });
 
@@ -230,6 +269,11 @@ export function createMetrics(): {
     metrics: {
       sessionsTotal,
       sessionsActive,
+      sessionsCompleted,
+      sessionsReaped,
+      idleTimeoutsFired,
+      oldestSessionAge,
+      signalsReceived,
       pluginInitDuration,
       pluginErrors,
       schedulerRuns,

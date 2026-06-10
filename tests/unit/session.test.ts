@@ -1,4 +1,11 @@
-import { applyStateTimestamps, buildSession, resolveSignalInvocation } from "../../src/core/session.js";
+import {
+  applyStateTimestamps,
+  buildSession,
+  buildSessionInventory,
+  oldestSessionAgeSeconds,
+  resolveSignalInvocation,
+  stalledCreatedSessions,
+} from "../../src/core/session.js";
 import type { Session, SessionState } from "../../src/types.js";
 
 function makeSession(overrides: Partial<Session> = {}): Session {
@@ -82,6 +89,62 @@ describe("buildSession", () => {
     const session = buildSession("id-1", "name", "plugin-a", "/work", false);
     expect(session.idleTimeoutMs).toBeUndefined();
     expect("idleTimeoutMs" in session).toBe(false);
+  });
+});
+
+describe("session monitor helpers", () => {
+  const now = new Date("2026-01-01T00:10:00Z");
+  const tenMinAgo = new Date("2026-01-01T00:00:00Z");
+  const oneMinAgo = new Date("2026-01-01T00:09:00Z");
+
+  describe("buildSessionInventory", () => {
+    it("reports id, name, state and age in seconds per session", () => {
+      const sessions = [
+        makeSession({ id: "a", name: "alpha", state: "CREATED", createdAt: tenMinAgo }),
+        makeSession({ id: "b", name: "beta", state: "ACTIVE", createdAt: oneMinAgo }),
+      ];
+      expect(buildSessionInventory(sessions, now)).toEqual([
+        { id: "a", name: "alpha", state: "CREATED", ageSeconds: 600 },
+        { id: "b", name: "beta", state: "ACTIVE", ageSeconds: 60 },
+      ]);
+    });
+
+    it("returns an empty array when there are no sessions", () => {
+      expect(buildSessionInventory([], now)).toEqual([]);
+    });
+  });
+
+  describe("oldestSessionAgeSeconds", () => {
+    it("returns the age of the oldest session", () => {
+      const sessions = [makeSession({ id: "a", createdAt: oneMinAgo }), makeSession({ id: "b", createdAt: tenMinAgo })];
+      expect(oldestSessionAgeSeconds(sessions, now)).toBe(600);
+    });
+
+    it("returns 0 when there are no sessions", () => {
+      expect(oldestSessionAgeSeconds([], now)).toBe(0);
+    });
+  });
+
+  describe("stalledCreatedSessions", () => {
+    it("flags a CREATED session older than the threshold", () => {
+      const sessions = [makeSession({ id: "a", state: "CREATED", createdAt: tenMinAgo })];
+      const stalled = stalledCreatedSessions(sessions, 300_000, now);
+      expect(stalled.map((s) => s.id)).toEqual(["a"]);
+    });
+
+    it("ignores a CREATED session younger than the threshold", () => {
+      const sessions = [makeSession({ id: "a", state: "CREATED", createdAt: oneMinAgo })];
+      expect(stalledCreatedSessions(sessions, 300_000, now)).toHaveLength(0);
+    });
+
+    it("never flags non-CREATED sessions regardless of age", () => {
+      const sessions = [
+        makeSession({ id: "active", state: "ACTIVE", createdAt: tenMinAgo }),
+        makeSession({ id: "idle", state: "IDLE", createdAt: tenMinAgo }),
+        makeSession({ id: "approval", state: "APPROVAL", createdAt: tenMinAgo }),
+      ];
+      expect(stalledCreatedSessions(sessions, 300_000, now)).toHaveLength(0);
+    });
   });
 });
 
