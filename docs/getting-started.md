@@ -511,6 +511,26 @@ tmux attach -t <session-name>
 
 Detection is content-based and matches the dialog wording across Claude Code versions, and it runs even under `--dangerously-skip-permissions` (the dialog precedes bypass mode). If a prompt is detected but cannot be dismissed, Conductor emits a `sessionError`, recycles the session, and rethrows so the plugin can back off — check the logs for the error. A session that shows neither a prompt nor a running REPL within the poll window is assumed already-trusted and allowed to proceed.
 
+This auto-accept is **best-effort**: it screen-scrapes the agent TUI, so it depends on the prompt rendering before the poll window expires and on its wording matching one of the known phrasings. Both can drift across Claude Code versions or flake under load, and when detection fails the session stalls on the dialog doing no work until it idle-times-out. For production or fully headless deployments, **pre-configure trust** (next section) so the dialog never appears — that is the deterministic path, and the screen-scraping fallback then only matters for workspaces you have not covered.
+
+### Pre-configuring folder trust (headless)
+
+`--dangerously-skip-permissions` controls tool-permission prompts, **not** folder trust — the two are separate subsystems, so passing it does not suppress the first-run trust dialog. To get past the dialog deterministically, mark the agent workspace as trusted in Claude Code's own config before any session starts.
+
+Each session is spawned in a fresh clone directory under a common workspace (clone-parent) directory. Claude Code's trust setting is **inherited by child directories**, so a single static entry for the workspace root covers every present and future clone — no per-session scripting and no screen-scraping. Add it to `~/.claude.json` (the home directory of the user the daemon runs as):
+
+```json
+{
+  "projects": {
+    "/path/to/agent/workspace": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+```
+
+Use the directory that contains the per-session clones (the clone-parent), not an individual clone path. With this in place, Claude Code shows no trust dialog for any session under that directory, and Conductor's `acceptTrustPrompt` sees the REPL come up directly. (Verified on Claude Code 2.1.170.)
+
 ### Metrics endpoint unreachable
 
 Confirm the port is not already in use:
