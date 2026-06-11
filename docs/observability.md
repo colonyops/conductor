@@ -30,8 +30,22 @@ All metrics use a `conductor_` prefix.
 |---|---|---|
 | `conductor_sessions_total` | Counter | `state`, `plugin_id` |
 | `conductor_sessions_active` | Gauge | `state` |
+| `conductor_sessions_completed_total` | Counter | `plugin_id` |
+| `conductor_sessions_reaped_total` | Counter | `plugin_id`, `result` |
+| `conductor_idle_timeouts_fired_total` | Counter | `plugin_id` |
+| `conductor_oldest_session_age_seconds` | Gauge | — |
 
-`state` values: `CREATED`, `ACTIVE`, `IDLE`, `APPROVAL`, `COMPLETE`. `plugin_id` is the stable `id` from the plugin definition.
+`state` values: `CREATED`, `ACTIVE`, `IDLE`, `APPROVAL`, `COMPLETE`. `plugin_id` is the stable `id` from the plugin definition (`conductor.reconciled` for a session re-adopted after a restart without metadata).
+
+`conductor_sessions_total` increments each time a session **enters** a state, so it always rises. `conductor_sessions_active` is the live count by state — `{state="CREATED"} 3` with no `ACTIVE` shows three sessions wedged before their first signal. `conductor_sessions_completed_total` and `conductor_sessions_reaped_total` (`result`: `ok`/`error`) are the lifecycle counterweights to creation: `created=3, completed=0` flags that reaping is broken. `conductor_idle_timeouts_fired_total` counts idle timers that actually fired (`0` means the timer never armed). `conductor_oldest_session_age_seconds` is refreshed every `sessionInventoryIntervalMs`; a value far above `idleTimeoutMs` is itself an alertable condition.
+
+#### Signals
+
+| Metric | Type | Labels |
+|---|---|---|
+| `conductor_signals_received_total` | Counter | `type`, `result` |
+
+`type` values: `activity`, `stop` (a `stop:approval` wire signal counts as `stop`). `result` values: `ok` (the signal drove a tracked session) / `error` (no such session, or an illegal transition). This is the single most useful gap-detector: `conductor_sessions_total{state="CREATED"}` rising while `conductor_signals_received_total` stays at `0` means the agent hooks are not reaching the daemon at all.
 
 #### Plugin lifecycle
 
@@ -57,7 +71,7 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 |---|---|---|
 | `conductor_ipc_events_total` | Counter | `signal` |
 
-`signal` values: `activity`, `stop`, `stop:approval`. This is the primary active metric — it increments once per IPC event received from Claude Code hooks.
+`signal` values: `activity`, `stop`, `stop:approval`. It increments once per IPC event drained from disk, before the event is applied to a session. (`conductor_signals_received_total` above adds the apply `result` and collapses `stop:approval` into `stop`.)
 
 #### Concurrency
 
@@ -76,7 +90,7 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 
 `backend` values: `env`, `keychain`, `stdin`. `result` values: `hit`, `miss`.
 
-> Most core metrics are defined but not yet fully instrumented and will report zero values. `conductor_ipc_events_total` is the only core counter currently active.
+> The session, signal, and IPC metrics above are live. `conductor_concurrency_*`, `conductor_plugin_*`, `conductor_scheduler_*`, and `conductor_secrets_*` are defined but not yet fully instrumented and may report zero values.
 
 ---
 
@@ -161,7 +175,9 @@ The built-in `github-issues` plugin ships these metrics as a reference implement
     "logMaxBytes": 10485760,
     "logMaxBackups": 5,
     "logFormat": "json",
-    "logCaller": false
+    "logCaller": false,
+    "sessionInventoryIntervalMs": 120000,
+    "signalStallWarnMs": 300000
   }
 }
 ```
@@ -173,6 +189,8 @@ The built-in `github-issues` plugin ships these metrics as a reference implement
 | `logMaxBackups` | `number` | `5` | Number of rotated files to keep. Oldest is deleted when exceeded. |
 | `logFormat` | `"json"` \| `"logfmt"` | `"json"` | Wire format for the log file and non-TTY stderr. |
 | `logCaller` | `boolean` | `false` | Attach a `caller` field with the `file:line` of the log call site. |
+| `sessionInventoryIntervalMs` | `number` | `120000` | How often the daemon logs a `session inventory` line and refreshes `conductor_oldest_session_age_seconds` (2 min). |
+| `signalStallWarnMs` | `number` | `300000` | How long a session may sit in `CREATED` without its first signal before a `no signal received for session` warning fires (5 min). |
 
 ### Rotation
 
@@ -211,9 +229,23 @@ Additional fields by source:
 | Source | Fields |
 |---|---|
 | Daemon startup | `pluginCount`, `dataDir` |
+| Signal invocation resolved | `invocation` |
 | Session state change | `sessionId`, `from`, `to`, `event` |
+| Session inventory (periodic) | `count`, `sessions` (`id`/`name`/`state`/`ageSeconds` per session) |
+| Stalled session warning | `sessionId`, `name`, `state`, `ageMinutes` |
+| Unknown / invalid signal | `sessionId`, `event` (and `state`, `error` for invalid) |
 | Plugin loaded | `pluginId`, `name` |
 | Plugin load error | `path`, `error` |
 | Scheduler error | `error`, `time` (daily jobs only) |
+
+### Diagnosing a silent session-lifecycle failure
+
+The signal hooks conductor injects run **inside** the spawned agent (Claude Code) in a separate tmux window. If that invocation is wrong (for example a bare `bun` with no script path), the hook fails in the agent's pane and the failure never reaches the daemon log directly. The startup line below records the exact command, so a malformed invocation is visible without scraping a pane:
+
+```
+{"level":"info","msg":"signal invocation resolved","invocation":"/usr/local/bin/bun /path/to/src/index.ts"}
+```
+
+When signals never arrive, conductor still makes the failure loud: the periodic `session inventory` line shows sessions wedged in `CREATED`, the `no signal received for session` warning fires once per stalled session after `signalStallWarnMs`, and `conductor_signals_received_total` stays at `0` while `conductor_sessions_total{state="CREATED"}` climbs.
 
 Plugin log lines use the plugin's `name` as the `component` field, making it straightforward to filter by plugin in any log tool that understands the JSON or logfmt format.

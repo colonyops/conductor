@@ -36,6 +36,8 @@ function makeConfig(idleTimeoutMs = 1_000_000): ConductorConfig {
       logMaxBackups: 5,
       logFormat: "json",
       logCaller: false,
+      sessionInventoryIntervalMs: 120_000,
+      signalStallWarnMs: 300_000,
     },
     idleTimeoutMs,
     builtins: {},
