@@ -45,6 +45,8 @@ Reconciliation runs before plugins start, so open-session caps and idle timers r
 
 Claude Code shows a first-run trust/safety dialog the first time it opens an untrusted folder. Conductor accepts it automatically by polling the session's tmux panes and dismissing the dialog (then confirming it actually cleared). Detection is **content-based**: the agent window is not assumed to be named `claude`, so it works regardless of which agent command hive launches. The dialog appears even under `--dangerously-skip-permissions` (it precedes bypass mode), and its wording is matched across Claude Code versions.
 
+This runtime auto-accept is **best-effort**. It screen-scrapes the agent TUI, so it depends on the prompt rendering within the poll window and on its wording matching one of the known phrasings — both of which can drift across Claude Code versions or flake under load. For **headless deployments, pre-configure trust** instead so no dialog is ever shown; see [Pre-configuring folder trust (headless)](docs/getting-started.md#pre-configuring-folder-trust-headless) in the Getting Started guide. The screen-scraping path then only matters as a fallback for workspaces you have not covered.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime

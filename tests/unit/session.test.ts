@@ -167,7 +167,28 @@ describe("resolveSignalInvocation", () => {
     expect(result).toBe("/usr/local/bin/bun /home/user/conductor/src/index.ts");
   });
 
-  it("returns execPath alone when running as a compiled binary (argv[1] is not .ts)", () => {
+  it("returns bun + script path for the release bundle (argv[1] ends with .js)", () => {
+    Object.defineProperty(process, "execPath", { value: "/usr/local/bin/bun", writable: true });
+    process.argv[1] = "/opt/conductor/conductor.js";
+
+    const result = resolveSignalInvocation();
+
+    expect(result).toBe("/usr/local/bin/bun /opt/conductor/conductor.js");
+  });
+
+  it.each(["/opt/conductor/conductor.mjs", "/opt/conductor/conductor.cjs"])(
+    "returns runtime + script path for %s",
+    (entry) => {
+      Object.defineProperty(process, "execPath", { value: "/usr/local/bin/bun", writable: true });
+      process.argv[1] = entry;
+
+      const result = resolveSignalInvocation();
+
+      expect(result).toBe(`/usr/local/bin/bun ${entry}`);
+    },
+  );
+
+  it("returns execPath alone when running as a compiled binary (argv[1] is not a script)", () => {
     Object.defineProperty(process, "execPath", { value: "/usr/local/bin/conductor", writable: true });
     process.argv[1] = "start";
 

@@ -49,13 +49,17 @@ export function readSessionMeta(sessionId: string): SessionMeta | undefined {
 // ── Hook injection helpers ────────────────────────────────────────────────────
 
 // Returns the absolute command prefix for conductor signal invocations.
-// When running from source via `bun run` (dev mode), process.argv[1] is the
-// .ts entry point; we use `bun <script>` so the hook resolves without
-// `conductor` on PATH. When running as a compiled binary, process.execPath
-// is the binary itself.
+// When launched through a JS/TS runtime, process.argv[1] is the script
+// entry point and process.execPath is the runtime (e.g. bun) — not conductor
+// — so we prefix with `<runtime> <script>` to make the hook resolve without
+// `conductor` on PATH. This covers both dev mode (`bun src/index.ts`) and the
+// release tarball (`bun conductor.js`). When running as a compiled single-file
+// binary, argv[1] is the first CLI arg (e.g. "start"), not a script path, and
+// process.execPath is the conductor binary itself.
 export function resolveSignalInvocation(): string {
-  if (process.argv[1]?.endsWith(".ts")) {
-    return `${process.execPath} ${process.argv[1]}`;
+  const entry = process.argv[1];
+  if (entry && /\.(ts|js|mjs|cjs)$/.test(entry)) {
+    return `${process.execPath} ${entry}`;
   }
   return process.execPath;
 }
