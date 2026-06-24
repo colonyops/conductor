@@ -2,6 +2,13 @@
   "name": "conductor",
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./sdk": {
+      "types": "./dist/types/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
     "conductor": "bun src/index.ts",
     "start": "bun src/index.ts start",
@@ -13,6 +20,9 @@
     "test:integration": "bun test tests/integration/scenarios/ --timeout=120000",
     "test:e2e": "bun test tests/e2e/",
     "build": "bun build src/index.ts --target bun --outfile dist/conductor.js",
+    "build:sdk": "bun build src/sdk/index.ts --target bun --outfile dist/sdk/index.js",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:release": "bun run build && bun run build:sdk && bun run build:types",
     "prepare": "git config --local core.hooksPath .git/hooks && lefthook install --force"
   },
   "dependencies": {
