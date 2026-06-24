@@ -30,6 +30,7 @@ export interface SessionMeta {
   pluginId: string;
   workDir: string;
   idleTimeoutMs?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export function writeSessionMeta(sessionId: string, meta: SessionMeta): void {
@@ -159,6 +160,7 @@ export function buildSession(
   workDir: string,
   isEphemeral: boolean,
   idleTimeoutMs?: number,
+  metadata?: Record<string, unknown>,
 ): Session {
   const eventsDir = sessionEventsDir(id);
   return {
@@ -171,6 +173,7 @@ export function buildSession(
     workDir,
     isEphemeral,
     ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
+    ...(metadata !== undefined ? { metadata } : {}),
   };
 }
 
@@ -254,6 +257,7 @@ export interface CreateSessionOptions {
   idleTimeoutMs?: number;
   prePromptOverride?: string;
   postPromptOverride?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SessionManagerDeps {
@@ -386,6 +390,7 @@ export class SessionManager {
           meta?.workDir ?? deriveWorkDir(record.repo, id),
           false,
           meta?.idleTimeoutMs,
+          meta?.metadata,
         ),
         "IDLE",
         new Date(),
@@ -432,7 +437,7 @@ export class SessionManager {
         }
       }
 
-      const session = buildSession(id, opts.name, opts.pluginId, workDir, false, opts.idleTimeoutMs);
+      const session = buildSession(id, opts.name, opts.pluginId, workDir, false, opts.idleTimeoutMs, opts.metadata);
       this.sessions.set(id, session);
       this.metrics?.sessionsTotal.inc({ state: session.state, plugin_id: session.pluginId });
       this.syncStateGauge();
@@ -446,6 +451,7 @@ export class SessionManager {
           pluginId: opts.pluginId,
           workDir,
           ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
+          ...(opts.metadata !== undefined ? { metadata: opts.metadata } : {}),
         });
       } catch (err) {
         this.logger?.warn("failed to persist session metadata", {

@@ -10,6 +10,12 @@ export interface NewSessionOptions {
   idleTimeoutMs?: number;
   prePromptOverride?: string;
   postPromptOverride?: string;
+  /**
+   * Opaque data attached to the created session and persisted to its sidecar.
+   * Read it back off `session` in any `onSession*` handler — e.g. to record
+   * which repo or issue a session belongs to without a KV side-table.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 type SessionEventHandler<E extends CoreEventName> = (payload: CoreEventPayload<E>) => Promise<void>;

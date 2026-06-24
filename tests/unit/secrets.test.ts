@@ -94,6 +94,49 @@ describe("createSecretsClient", () => {
     });
   });
 
+  describe("cliToken resolution", () => {
+    it("resolves from a CLI's stdout before the keychain", async () => {
+      const mockProc = {
+        exited: Promise.resolve(0),
+        stdout: new Response("cli-token-value\n").body,
+        stderr: new Response("").body,
+      };
+      let capturedArgs: string[] = [];
+      jest.spyOn(Bun, "spawn").mockImplementation(((args: string[]) => {
+        capturedArgs = args;
+        return mockProc as ReturnType<typeof Bun.spawn>;
+      }) as typeof Bun.spawn);
+
+      try {
+        const client = createSecretsClient();
+        const val = await client.get("gitea.token", { cliToken: ["tea", "login", "default", "--token"] });
+        expect(val).toBe("cli-token-value");
+        expect(capturedArgs).toEqual(["tea", "login", "default", "--token"]);
+      } finally {
+        jest.restoreAllMocks();
+      }
+    });
+
+    it("falls through to keychain when the CLI exits non-zero", async () => {
+      // First spawn (cliToken) fails; second spawn (keychain) also fails → throws.
+      const failingProc = {
+        exited: Promise.resolve(1),
+        stdout: new Response("").body,
+        stderr: new Response("").body,
+      };
+      jest.spyOn(Bun, "spawn").mockReturnValue(failingProc as ReturnType<typeof Bun.spawn>);
+
+      try {
+        const client = createSecretsClient();
+        await expect(client.get("gitea.token", { cliToken: ["tea", "nope"] })).rejects.toThrow(
+          "cliToken `tea nope` returned nothing",
+        );
+      } finally {
+        jest.restoreAllMocks();
+      }
+    });
+  });
+
   describe("keychain mock", () => {
     it("resolves from macOS keychain when security command succeeds", async () => {
       // Spy on Bun.spawn to simulate a successful keychain lookup

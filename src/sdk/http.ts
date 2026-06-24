@@ -4,6 +4,13 @@ export type RequestInterceptor = (init: RequestInit) => RequestInit;
 export type ResponseInterceptor = (response: Response, init?: RequestInit) => void;
 export type BearerTokenProvider = () => string | null | Promise<string | null>;
 
+/** An Authorization credential: scheme (e.g. "Bearer", "token") plus the token. */
+export interface AuthCredential {
+  scheme: string;
+  token: string;
+}
+export type AuthProvider = () => AuthCredential | null | Promise<AuthCredential | null>;
+
 export interface HttpRequestArgs<T = unknown> {
   url: string;
   body?: T;
@@ -27,7 +34,14 @@ export interface HttpClient {
   delete<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
   withRequestInterceptor(fn: RequestInterceptor): HttpClient;
   withResponseInterceptor(fn: ResponseInterceptor): HttpClient;
+  /** Send `Authorization: Bearer <token>`. Shorthand for withAuth with the Bearer scheme. */
   withBearer(token: BearerTokenProvider): HttpClient;
+  /**
+   * Send `Authorization: <scheme> <token>` from the provider's credential.
+   * Use for non-Bearer forges (e.g. Gitea's `token <t>`, Basic, custom schemes).
+   * A null credential sends no Authorization header.
+   */
+  withAuth(provider: AuthProvider): HttpClient;
 }
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -37,7 +51,7 @@ const BODY_METHODS = new Set<Method>(["POST", "PUT", "PATCH"]);
 export function createHttpClient(logger: Logger, baseHeaders: Record<string, string> = {}): HttpClient {
   const requestInterceptors: RequestInterceptor[] = [];
   const responseInterceptors: ResponseInterceptor[] = [];
-  let getBearer: BearerTokenProvider = () => null;
+  let getAuth: AuthProvider = () => null;
 
   function applyRequestInterceptors(init: RequestInit): RequestInit {
     return requestInterceptors.reduce((acc, fn) => fn(acc), init);
@@ -46,9 +60,9 @@ export function createHttpClient(logger: Logger, baseHeaders: Record<string, str
   async function doRequest<T>(method: Method, args: HttpRequestArgs): Promise<HttpResponse<T>> {
     const headers: Record<string, string> = { ...baseHeaders, ...args.headers };
 
-    const token = await getBearer();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    const credential = await getAuth();
+    if (credential?.token) {
+      headers.Authorization = `${credential.scheme} ${credential.token}`;
     }
 
     const init: RequestInit = { method, headers };
@@ -126,7 +140,15 @@ export function createHttpClient(logger: Logger, baseHeaders: Record<string, str
     },
 
     withBearer(token) {
-      getBearer = token;
+      getAuth = async () => {
+        const t = await token();
+        return t ? { scheme: "Bearer", token: t } : null;
+      };
+      return client;
+    },
+
+    withAuth(provider) {
+      getAuth = provider;
       return client;
     },
   };

@@ -30,15 +30,38 @@ export interface Session {
    * `config.idleTimeoutMs`.
    */
   idleTimeoutMs?: number;
+  /**
+   * Opaque plugin-supplied data attached at `newSession()`, carried on the
+   * session and persisted to the `meta.json` sidecar so it survives daemon
+   * restarts. Lets a plugin attribute a session (e.g. to a repo or issue)
+   * without a separate KV side-table. Conductor never reads its contents.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
+
+/**
+ * A required-secret declaration. A bare string is shorthand for keychain-only
+ * resolution of that key. The object form carries the same resolution options
+ * `ctx.secrets.get` accepts, so a secret sourced from an env var or a CLI
+ * validates before `init` instead of being treated as missing.
+ */
+export interface RequiredSecret {
+  key: string;
+  /** Env var to try first (matches GetSecretOptions.env). */
+  env?: string;
+  /** Try `gh auth token` before the keychain (matches GetSecretOptions.ghCLI). */
+  ghCLI?: boolean;
+  /** Run this argv and take stdout as the token (matches GetSecretOptions.cliToken). */
+  cliToken?: string[];
+}
 
 export interface PluginMeta {
   id: string;
   name: string;
   version?: string;
-  requiredSecrets?: string[];
+  requiredSecrets?: Array<string | RequiredSecret>;
 }
 
 export interface PluginModule {
@@ -57,6 +80,12 @@ export interface PluginContext {
   logger: Logger;
   http: HttpClient;
   metrics: PluginMetrics;
+  /**
+   * Opaque per-plugin configuration from the plugin's config entry (`config`
+   * field). Undefined when the entry declares none. The plugin owns its shape
+   * and validation — Conductor passes it through untouched.
+   */
+  config?: unknown;
 }
 
 // ── IPC Events ───────────────────────────────────────────────────────────────

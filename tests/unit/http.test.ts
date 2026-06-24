@@ -59,3 +59,45 @@ describe("createHttpClient withBearer", () => {
     expect(authHeader()).toBeUndefined();
   });
 });
+
+describe("createHttpClient withAuth", () => {
+  const realFetch = globalThis.fetch;
+  let lastInit: RequestInit | undefined;
+
+  beforeEach(() => {
+    lastInit = undefined;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      lastInit = init;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function authHeader(): string | undefined {
+    return (lastInit?.headers as Record<string, string>)?.Authorization;
+  }
+
+  it("sends a non-Bearer scheme verbatim (Gitea 'token')", async () => {
+    const client = createHttpClient(noopLogger).withAuth(async () => ({ scheme: "token", token: "abc" }));
+    await client.get({ url: "https://gitea.example.com/x" });
+    expect(authHeader()).toBe("token abc");
+  });
+
+  it("awaits an async credential provider", async () => {
+    const client = createHttpClient(noopLogger).withAuth(async () => ({ scheme: "Basic", token: "dXNlcjpwdw==" }));
+    await client.get({ url: "https://api.example.com/x" });
+    expect(authHeader()).toBe("Basic dXNlcjpwdw==");
+  });
+
+  it("omits the Authorization header when the credential is null", async () => {
+    const client = createHttpClient(noopLogger).withAuth(async () => null);
+    await client.get({ url: "https://api.example.com/x" });
+    expect(authHeader()).toBeUndefined();
+  });
+});

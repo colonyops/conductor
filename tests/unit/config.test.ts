@@ -86,6 +86,19 @@ describe("validateConfig", () => {
     expect(config.plugins).toEqual([]);
   });
 
+  it("passes a plugin entry's opaque `config` field through untouched", () => {
+    const { config, errors } = validateConfig({
+      plugins: [{ path: "./p.ts", enabled: true, config: { baseUrl: "https://x", nested: { n: 1 } } }],
+    });
+    expect(errors).toHaveLength(0);
+    expect(config.plugins[0]?.config).toEqual({ baseUrl: "https://x", nested: { n: 1 } });
+  });
+
+  it("omits `config` from the normalized entry when the entry declares none", () => {
+    const { config } = validateConfig({ plugins: [{ path: "./p.ts", enabled: true }] });
+    expect("config" in (config.plugins[0] ?? {})).toBe(false);
+  });
+
   it("rejects non-object input", () => {
     const { errors } = validateConfig("not an object");
     expect(errors).toHaveLength(1);

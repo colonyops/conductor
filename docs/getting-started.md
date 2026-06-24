@@ -185,6 +185,8 @@ Allow this plugin? [y/N]:
 
 Type `y` to approve. The hash is written back to `trustedPlugins` in your config. If you modify the plugin file, you will be prompted again on next startup.
 
+On a host with no TTY (e.g. running under systemd), there is nothing to answer the prompt, so an untrusted plugin is **skipped** instead of hanging the daemon. Pre-approve it before starting with `conductor plugins trust <path>` (see [Pre-approving plugins on headless hosts](#pre-approving-plugins-on-headless-hosts)).
+
 ### Polling example
 
 Most real plugins use `ctx.scheduler.interval` to poll an external source and create sessions:
@@ -231,8 +233,9 @@ Secrets are resolved in this order:
 
 1. Environment variable (if `opts.env` is set)
 2. `gh auth token` (only if `opts.ghCLI: true`)
-3. OS keychain (`security` on macOS, `secret-tool` on Linux)
-4. Interactive stdin prompt (only if `opts.promptIfMissing: true`)
+3. `opts.cliToken` argv — trimmed stdout (if set)
+4. OS keychain (`security` on macOS, `secret-tool` on Linux)
+5. Interactive stdin prompt (only if `opts.promptIfMissing: true`)
 
 ```ts
 // From environment variable GITHUB_TOKEN, falling back to keychain
@@ -240,9 +243,16 @@ const token = await ctx.secrets.get("github.token", {
   env: "GITHUB_TOKEN",
   promptIfMissing: true,
 });
+
+// Reuse another forge CLI's stored token instead of vaulting a copy
+const giteaToken = await ctx.secrets.get("gitea.token", {
+  cliToken: ["tea", "login", "default", "--token"],
+});
 ```
 
 On first run with `promptIfMissing: true`, you will be prompted once and the value is stored in the OS keychain for subsequent runs.
+
+> **`requiredSecrets` and env/CLI sources:** a bare string in `requiredSecrets` is validated against the keychain only. If your secret comes from an env var or a CLI, declare it in the object form — `{ key: "gitea.token", env: "GITEA_TOKEN" }` — so the pre-`init` validation looks in the same place `init` will. A bare `requiredSecrets: ["gitea.token"]` whose value lives in `GITEA_TOKEN` would otherwise skip the plugin even though the token is present.
 
 ---
 
@@ -394,7 +404,8 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
       "path": "./plugins/my-plugin.ts",
       "enabled": true,
       "idleTimeoutMs": 300000,
-      "concurrencyLimit": 3
+      "concurrencyLimit": 3,
+      "config": { "baseUrl": "https://gitea.example.com", "repo": "org/repo" }
     }
   ]
 }
@@ -406,6 +417,18 @@ Config is loaded from `.conductor/conductor.config.json` or `conductor.config.js
 | `enabled` | `boolean` | `true` | Set to `false` to disable a plugin without removing it |
 | `idleTimeoutMs` | `number` | global value | Per-plugin idle timeout override |
 | `concurrencyLimit` | `number` | — | Max concurrent sessions this plugin can hold; unlimited if omitted |
+| `config` | `unknown` | — | Opaque per-plugin configuration, passed through to the plugin as `ctx.config`. Conductor does not interpret it — the plugin owns its shape and validation |
+
+The `config` field is how external plugins receive configuration. It arrives as `ctx.config` (typed `unknown`); the plugin casts and validates it:
+
+```ts
+interface MyConfig { baseUrl: string; repo: string }
+
+async init(ctx) {
+  const cfg = ctx.config as MyConfig;
+  if (!cfg?.baseUrl) throw new Error("config.baseUrl is required");
+}
+```
 
 ### Built-in: `github-issues`
 
@@ -571,13 +594,26 @@ const token = await ctx.secrets.get("github.token", {
 
 Set `GITHUB_TOKEN` in your CI environment and the keychain lookup is skipped.
 
+If you also declare the secret in `requiredSecrets`, use the object form so the pre-`init` validation looks at the env var too — `requiredSecrets: [{ key: "github.token", env: "GITHUB_TOKEN" }]`. A bare string is validated against the keychain only and would skip the plugin in CI even though `GITHUB_TOKEN` is set.
+
+### Pre-approving plugins on headless hosts
+
+The plugin trust prompt needs an interactive terminal. On a host with no TTY (systemd, a container entrypoint, CI), conductor cannot ask, so an untrusted or changed plugin is **skipped** and a line is written to stderr — the daemon does not hang. Approve plugins out of band before starting:
+
+```bash
+conductor plugins list                            # path, enabled/disabled, trust status
+conductor plugins trust ./plugins/my-plugin.ts    # pin the file's current hash
+```
+
+`plugins trust` resolves the path against your configured `plugins` entries and writes the pin under the exact key the loader checks, so `~` vs absolute paths or trailing slashes cannot silently miss. Re-run it whenever the plugin file changes (its hash, and therefore its trust, changes with it).
+
 ---
 
 ## Source reference
 
 | File | Description |
 |---|---|
-| [`src/index.ts`](../src/index.ts) | CLI entry point (`conductor start`, `signal`, `plugin-docs`) |
+| [`src/index.ts`](../src/index.ts) | CLI entry point (`conductor start`, `signal`, `plugins trust`/`list`, `plugin-docs`) |
 | [`src/config.ts`](../src/config.ts) | Config loading, validation, and path resolution |
 | [`src/core/lifecycle.ts`](../src/core/lifecycle.ts) | Pure state machine — transition table |
 | [`src/core/ipc.ts`](../src/core/ipc.ts) | IPC signal writing and file watcher |

@@ -164,6 +164,25 @@ describe("promptTrustApproval", () => {
     expect(capturedQuestion).toContain("/path/to/plugin.ts");
     expect(capturedQuestion).toContain("sha256:abc123");
   });
+
+  it("fails closed (returns false) when there is no readLineFn and no TTY", async () => {
+    // Without a readLineFn the real readline path runs; with no TTY it would
+    // otherwise block forever on stdin. It must return false instead of hanging.
+    const savedIsTTY = process.stdin.isTTY;
+    const stderrSpy = jest.spyOn(process.stderr, "write").mockReturnValue(true);
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    try {
+      const result = await promptTrustApproval(meta, "new");
+      expect(result).toBe(false);
+      // A diagnostic naming the plugin and the remedy is written to stderr.
+      const written = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(written).toContain("/path/to/plugin.ts");
+      expect(written).toContain("conductor plugins trust");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: savedIsTTY, configurable: true });
+      stderrSpy.mockRestore();
+    }
+  });
 });
 
 // ── persistTrustedPlugins ─────────────────────────────────────────────────────

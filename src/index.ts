@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath, resolvePath } from "./config.js";
 import { EventBus } from "./core/events.js";
 import { conductorDataDir, isApprovalSignal, watchIpcEvents, writeIpcEvent } from "./core/ipc.js";
 import { createMetrics, startMetricsServer } from "./core/observability.js";
 import { SessionManager, resolveSignalInvocation } from "./core/session.js";
-import { loadPlugins, unloadPlugins } from "./plugins/loader.js";
+import { checkTrust, hashPlugin, loadPlugins, persistTrustedPlugins, unloadPlugins } from "./plugins/loader.js";
 import type { PluginRegistration } from "./plugins/loader.js";
 import { createConcurrencyLimiter } from "./sdk/concurrency.js";
 import { openKVDatabase } from "./sdk/kv.js";
@@ -58,6 +60,19 @@ trust is established from the file bytes first). Approved hashes are written bac
 to \`trustedPlugins\` in the config, keyed by the config-declared \`path\`. If the
 file changes, the hash no longer matches and you are re-prompted on next startup.
 
+On a host with no TTY (e.g. systemd), there is nothing to answer the prompt, so
+an untrusted plugin is **skipped** rather than hanging the daemon. Pre-approve it
+out of band before starting:
+
+\`\`\`sh
+conductor plugins trust ./plugins/my-plugin.ts   # pins the current file hash
+conductor plugins list                           # show each plugin's trust status
+\`\`\`
+
+\`plugins trust\` resolves the path against your configured entries and writes the
+pin under the same key the loader checks, so \`~\` vs absolute paths can't silently
+miss.
+
 ---
 
 ## PluginMeta fields
@@ -67,7 +82,7 @@ file changes, the hash no longer matches and you are re-prompted on next startup
 | \`id\` | string | yes | Stable unique identifier, e.g. \`"acme.github-issues"\` |
 | \`name\` | string | yes | Human-readable display name |
 | \`version\` | string | no | Semver string |
-| \`requiredSecrets\` | string[] | no | Keys that must resolve; plugin is skipped if any fail |
+| \`requiredSecrets\` | (string \| RequiredSecret)[] | no | Keys that must resolve before init; plugin is skipped if any fail. A bare string resolves keychain-only; use the object form (\`{ key, env?, ghCLI?, cliToken? }\`) for env/CLI-sourced secrets |
 
 ---
 
@@ -82,6 +97,37 @@ interface PluginContext {
   logger:    Logger;
   http:      HttpClient;
   metrics:   PluginMetrics;   // register plugin-namespaced Prometheus metrics
+  config?:   unknown;         // opaque per-plugin config from the config entry
+}
+\`\`\`
+
+---
+
+### ctx.config — per-plugin configuration
+
+External plugins receive their configuration through \`ctx.config\`, supplied by
+the \`config\` field of the plugin's config entry. Conductor passes it through
+untouched — the plugin owns its shape and validation. Undefined when the entry
+declares no \`config\`.
+
+\`\`\`json
+{
+  "plugins": [
+    {
+      "path": "./plugins/gitea-issues.ts",
+      "enabled": true,
+      "config": { "baseUrl": "https://gitea.example.com", "repo": "org/repo", "labels": ["conductor"] }
+    }
+  ]
+}
+\`\`\`
+
+\`\`\`ts
+interface GiteaConfig { baseUrl: string; repo: string; labels: string[] }
+
+async init(ctx) {
+  const cfg = ctx.config as GiteaConfig;       // validate as you see fit
+  if (!cfg?.baseUrl) throw new Error("gitea: config.baseUrl is required");
 }
 \`\`\`
 
@@ -127,6 +173,7 @@ interface NewSessionOptions {
   idleTimeoutMs?:     number;          // overrides config for this session only
   prePromptOverride?: string;          // replaces the global prePromptTemplate for this session
   postPromptOverride?: string;         // replaces the global postPromptTemplate for this session
+  metadata?:          Record<string, unknown>;  // opaque data carried on the session + persisted
 }
 
 interface HiveClient {
@@ -157,6 +204,7 @@ interface Session {
   eventsDir:    string;
   workDir:      string;
   isEphemeral:  boolean;
+  metadata?:    Record<string, unknown>;   // whatever was passed to newSession
 }
 \`\`\`
 
@@ -167,10 +215,13 @@ const session = await ctx.hive.newSession({
   name: "issue-123",
   remote: "https://github.com/owner/repo",
   context: "Fix the bug described in issue #123",
+  metadata: { repo: "owner/repo", issue: 123 },
 });
 
+// metadata rides on the session into every handler — no KV side-table needed
 ctx.hive.onSessionComplete(async ({ session }) => {
-  ctx.logger.info("done", { id: session.id });
+  const meta = session.metadata as { repo: string; issue: number } | undefined;
+  ctx.logger.info("done", { id: session.id, issue: meta?.issue });
 });
 \`\`\`
 
@@ -178,15 +229,17 @@ ctx.hive.onSessionComplete(async ({ session }) => {
 
 ### ctx.secrets — SecretsClient
 
-Resolve secrets from environment variables, the \`gh\` CLI, the OS keychain
-(macOS \`security\`, Linux \`secret-tool\`), or interactive stdin prompt.
-Resolution order: env (if \`env\` set) → \`gh auth token\` (if \`ghCLI\`) →
-OS keychain → interactive prompt (if \`promptIfMissing\`).
+Resolve secrets from environment variables, the \`gh\` CLI, an arbitrary CLI,
+the OS keychain (macOS \`security\`, Linux \`secret-tool\`), or interactive
+stdin prompt. Resolution order: env (if \`env\` set) → \`gh auth token\` (if
+\`ghCLI\`) → \`cliToken\` argv (if set) → OS keychain → interactive prompt
+(if \`promptIfMissing\`).
 
 \`\`\`ts
 interface GetSecretOptions {
   env?:             string;    // env var name to try first
   ghCLI?:           boolean;   // try \`gh auth token\` before the keychain
+  cliToken?:        string[];  // run this argv, take trimmed stdout as the token
   promptIfMissing?: boolean;   // prompt the user interactively if not found
 }
 
@@ -201,18 +254,26 @@ Example:
 \`\`\`ts
 // Tries GITHUB_TOKEN env var first, then OS keychain "github.token"
 const token = await ctx.secrets.get("github.token", { env: "GITHUB_TOKEN" });
+
+// Reuse another CLI's stored auth instead of vaulting a copy
+const giteaToken = await ctx.secrets.get("gitea.token", {
+  cliToken: ["tea", "login", "default", "--token"],
+});
 \`\`\`
 
 Declare keys in \`requiredSecrets\` so Conductor validates they resolve before
-calling \`init\`:
+calling \`init\`. A bare string resolves keychain-only; if your secret comes from
+an env var or a CLI, use the object form so validation looks in the same place
+\`init\` will — otherwise a secret that *is* present gets the plugin skipped:
 
 \`\`\`ts
 export default definePlugin({
   id: "my-org.my-plugin",
   name: "My Plugin",
-  requiredSecrets: ["my-api-key"],
+  // keychain-only key + an env-sourced token, both validated before init runs
+  requiredSecrets: ["my-keychain-key", { key: "gitea.token", env: "GITEA_TOKEN" }],
   async init(ctx) {
-    const key = await ctx.secrets.get("my-api-key"); // guaranteed to resolve
+    const token = await ctx.secrets.get("gitea.token", { env: "GITEA_TOKEN" });
   },
 });
 \`\`\`
@@ -297,10 +358,13 @@ interface HttpRequestArgs {
 }
 
 interface HttpResponse<T> {
-  status: number;
-  headers: Record<string, string>;
-  data: T;
+  status:   number;
+  error:    boolean;       // true when the response was not ok (status >= 400)
+  data:     T;
+  response: Response;       // the raw fetch Response
 }
+
+interface AuthCredential { scheme: string; token: string }
 
 interface HttpClient {
   get<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
@@ -309,7 +373,10 @@ interface HttpClient {
   patch<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
   delete<T>(args: HttpRequestArgs): Promise<HttpResponse<T>>;
 
+  // Authorization: Bearer <token>
   withBearer(tokenFn: () => string | null | Promise<string | null>): HttpClient;
+  // Authorization: <scheme> <token> — for non-Bearer forges (Gitea "token", Basic, custom)
+  withAuth(provider: () => AuthCredential | null | Promise<AuthCredential | null>): HttpClient;
   withRequestInterceptor(fn: RequestInterceptor): HttpClient;
   withResponseInterceptor(fn: ResponseInterceptor): HttpClient;
 }
@@ -318,11 +385,16 @@ interface HttpClient {
 Example:
 
 \`\`\`ts
-const client = ctx.http.withBearer(async () => token);
+// GitHub-style Bearer
+const gh = ctx.http.withBearer(async () => token);
 
-const res = await client.get<{ items: Item[] }>({
-  url: "https://api.example.com/items",
+// Gitea/Forgejo use the "token" scheme, not "Bearer"
+const gitea = ctx.http.withAuth(async () => ({ scheme: "token", token }));
+
+const res = await gitea.get<{ items: Item[] }>({
+  url: "https://gitea.example.com/api/v1/repos/org/repo/issues",
 });
+if (res.error) ctx.logger.warn("gitea error", { status: res.status });
 console.log(res.data.items);
 \`\`\`
 
@@ -653,6 +725,77 @@ program
   .description("Print the plugin SDK reference (LLM-friendly markdown for plugin authoring)")
   .action(() => {
     console.log(PLUGIN_DOCS);
+  });
+
+const pluginsCmd = program.command("plugins").description("Inspect and manage plugin trust");
+
+// Resolves `path` against the configured plugin entries and returns the entry
+// whose path points at the same file. Both sides are canonicalized with
+// realpathSync (after ~ expansion) so symlinks, `..` segments, trailing
+// slashes, and relative-vs-absolute spellings all collapse to one identity —
+// the loader's path-string trust key is otherwise easy to miss. Falls back to a
+// plain absolute resolve when the file does not exist. The pin is still written
+// under the entry's literal `path`, the exact key the loader checks.
+function findPluginEntry(config: ReturnType<typeof loadConfig>, path: string) {
+  const canonical = (p: string) => {
+    const abs = resolve(resolvePath(p));
+    try {
+      return realpathSync(abs);
+    } catch {
+      return abs;
+    }
+  };
+  const target = canonical(path);
+  return config.plugins.find((p) => canonical(p.path) === target);
+}
+
+pluginsCmd
+  .command("trust <path>")
+  .description("Pre-approve a plugin's current file hash (for headless/non-TTY hosts)")
+  .option("-c, --config <path>", "Path to conductor.config.json")
+  .action(async (path: string, opts: { config?: string }) => {
+    try {
+      const config = loadConfig(opts.config);
+      const configPath = resolveConfigPath(opts.config);
+      const entry = findPluginEntry(config, path);
+      if (!entry) {
+        console.error(`No plugin entry in config matches "${path}". Add it to "plugins" first.`);
+        process.exit(1);
+      }
+      const hash = await hashPlugin(entry.path);
+      const status = checkTrust(entry.path, hash, config);
+      if (status === "trusted") {
+        console.log(`Already trusted: ${entry.path} (${hash})`);
+        return;
+      }
+      await persistTrustedPlugins([{ trustKey: entry.path, hash }], config, configPath);
+      console.log(`${status === "changed" ? "Updated" : "Trusted"}: ${entry.path} (${hash})`);
+    } catch (e) {
+      console.error(`Failed to trust plugin: ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+pluginsCmd
+  .command("list")
+  .description("List configured plugins and their trust status")
+  .option("-c, --config <path>", "Path to conductor.config.json")
+  .action(async (opts: { config?: string }) => {
+    const config = loadConfig(opts.config);
+    if (config.plugins.length === 0) {
+      console.log("(no plugins configured)");
+      return;
+    }
+    for (const entry of config.plugins) {
+      const enabled = entry.enabled === false ? "disabled" : "enabled";
+      let status: string;
+      try {
+        status = checkTrust(entry.path, await hashPlugin(entry.path), config);
+      } catch {
+        status = "missing-file";
+      }
+      console.log(`${entry.path}  [${enabled}, ${status}]`);
+    }
   });
 
 const kvCmd = program.command("kv").description("Inspect and manage plugin KV state");

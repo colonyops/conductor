@@ -12,6 +12,12 @@ export interface PluginEntry {
   enabled: boolean;
   idleTimeoutMs?: number;
   concurrencyLimit?: number;
+  /**
+   * Opaque per-plugin configuration, passed through to the plugin as
+   * `ctx.config`. Conductor does not interpret it — shape and validation are
+   * the plugin's responsibility.
+   */
+  config?: unknown;
 }
 
 export interface GitHubIssuesBuiltinConfig {
@@ -350,6 +356,7 @@ export function validateConfig(raw: unknown): {
           enabled: p.enabled ?? true,
           ...(p.idleTimeoutMs !== undefined ? { idleTimeoutMs: p.idleTimeoutMs } : {}),
           ...(p.concurrencyLimit !== undefined ? { concurrencyLimit: p.concurrencyLimit } : {}),
+          ...(p.config !== undefined ? { config: p.config } : {}),
         })),
     trustedPlugins: hasError("trustedPlugins")
       ? CONFIG_DEFAULTS.trustedPlugins

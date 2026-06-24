@@ -90,6 +90,16 @@ describe("buildSession", () => {
     expect(session.idleTimeoutMs).toBeUndefined();
     expect("idleTimeoutMs" in session).toBe(false);
   });
+
+  it("carries plugin-supplied metadata when provided", () => {
+    const session = buildSession("id-1", "name", "plugin-a", "/work", false, undefined, { repo: "org/repo", issue: 7 });
+    expect(session.metadata).toEqual({ repo: "org/repo", issue: 7 });
+  });
+
+  it("omits metadata when not provided rather than storing undefined", () => {
+    const session = buildSession("id-1", "name", "plugin-a", "/work", false);
+    expect("metadata" in session).toBe(false);
+  });
 });
 
 describe("session monitor helpers", () => {

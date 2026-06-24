@@ -6,11 +6,12 @@ import type { ConductorConfig } from "../../src/config.js";
 import { EventBus } from "../../src/core/events.js";
 import { createPluginMetricsFactory } from "../../src/core/observability.js";
 import { SessionManager } from "../../src/core/session.js";
-import { loadPlugins } from "../../src/plugins/loader.js";
+import { loadPlugins, validatePluginSecrets } from "../../src/plugins/loader.js";
 import { createConcurrencyLimiter } from "../../src/sdk/concurrency.js";
 import { openKVDatabase } from "../../src/sdk/kv.js";
 import type { Logger } from "../../src/sdk/logger.js";
 import type { SecretsClient } from "../../src/sdk/secrets.js";
+import type { Plugin } from "../../src/types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,22 @@ function writePluginFixture(dir: string, markerPath: string): string {
     `import { writeFileSync } from "node:fs";`,
     `writeFileSync(${JSON.stringify(markerPath)}, "executed");`,
     `export default { id: "side-effect", name: "Side Effect", init: async () => {} };`,
+    "",
+  ].join("\n");
+  writeFileSync(file, source);
+  return file;
+}
+
+// Writes a plugin whose init() records the JSON-serialized ctx.config it received,
+// so a test can assert the config entry was injected.
+function writeConfigEchoFixture(dir: string, markerPath: string): string {
+  const file = join(dir, "config-echo.plugin.ts");
+  const source = [
+    `import { writeFileSync } from "node:fs";`,
+    "export default {",
+    `  id: "config-echo", name: "Config Echo",`,
+    `  init: async (ctx) => { writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify(ctx.config ?? null)); },`,
+    "};",
     "",
   ].join("\n");
   writeFileSync(file, source);
@@ -160,5 +177,90 @@ describe("loadPlugins trust gating", () => {
     expect(prompted).toBe(false);
     expect(existsSync(marker)).toBe(true);
     expect(registrations).toHaveLength(1);
+  });
+});
+
+describe("loadPlugins config injection", () => {
+  it("passes the config entry's `config` field through to ctx.config", async () => {
+    const dir = tmpDir();
+    const marker = join(dir, "config.marker");
+    const pluginPath = writeConfigEchoFixture(dir, marker);
+    const configPath = join(dir, "conductor.config.json");
+
+    const config = makeConfig(pluginPath);
+    config.plugins = [
+      {
+        ...config.plugins[0],
+        path: pluginPath,
+        enabled: true,
+        config: { baseUrl: "https://gitea.example.com", repo: "org/repo" },
+      },
+    ];
+
+    const { opts } = makeOpts(config, configPath, dir, "y");
+    const registrations = await loadPlugins(opts);
+
+    expect(registrations).toHaveLength(1);
+    expect(JSON.parse(readFileSync(marker, "utf-8"))).toEqual({
+      baseUrl: "https://gitea.example.com",
+      repo: "org/repo",
+    });
+  });
+
+  it("leaves ctx.config undefined when the entry declares none", async () => {
+    const dir = tmpDir();
+    const marker = join(dir, "config.marker");
+    const pluginPath = writeConfigEchoFixture(dir, marker);
+    const configPath = join(dir, "conductor.config.json");
+
+    const { opts } = makeOpts(makeConfig(pluginPath), configPath, dir, "y");
+    await loadPlugins(opts);
+
+    // The fixture writes `null` for an undefined ctx.config.
+    expect(JSON.parse(readFileSync(marker, "utf-8"))).toBeNull();
+  });
+});
+
+describe("validatePluginSecrets", () => {
+  function pluginWith(requiredSecrets: Plugin["requiredSecrets"]): Plugin {
+    return { id: "p", name: "P", ...(requiredSecrets ? { requiredSecrets } : {}), init: async () => {} };
+  }
+
+  it("returns true when there are no required secrets", async () => {
+    expect(await validatePluginSecrets(pluginWith(undefined), noopSecrets)).toBe(true);
+  });
+
+  it("resolves a bare-string secret with no options (keychain-only)", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const secrets: SecretsClient = {
+      get: async (key, opts) => {
+        calls.push([key, opts]);
+        return "ok";
+      },
+      set: async () => {},
+    };
+    expect(await validatePluginSecrets(pluginWith(["github.token"]), secrets)).toBe(true);
+    expect(calls).toEqual([["github.token", undefined]]);
+  });
+
+  it("passes env/cliToken options through for the object form", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const secrets: SecretsClient = {
+      get: async (key, opts) => {
+        calls.push([key, opts]);
+        return "ok";
+      },
+      set: async () => {},
+    };
+    const ok = await validatePluginSecrets(
+      pluginWith([{ key: "gitea.token", env: "GITEA_TOKEN", cliToken: ["tea", "--token"] }]),
+      secrets,
+    );
+    expect(ok).toBe(true);
+    expect(calls).toEqual([["gitea.token", { env: "GITEA_TOKEN", cliToken: ["tea", "--token"] }]]);
+  });
+
+  it("returns false when a required secret cannot be resolved", async () => {
+    expect(await validatePluginSecrets(pluginWith(["missing"]), noopSecrets)).toBe(false);
   });
 });

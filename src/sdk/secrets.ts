@@ -3,6 +3,13 @@ export interface GetSecretOptions {
   env?: string;
   /** If true, try `gh auth token` before falling back to keychain. */
   ghCLI?: boolean;
+  /**
+   * If set, run this argv and take trimmed stdout as the token before falling
+   * back to keychain. Lets any forge reuse its CLI's stored auth (e.g.
+   * `["tea", "login", "default", "--token"]`) without a GitHub-specific path.
+   * Tried after `ghCLI`.
+   */
+  cliToken?: string[];
   /** If true, prompt interactively when not found and store in OS keychain. */
   promptIfMissing?: boolean;
 }
@@ -11,8 +18,10 @@ export interface SecretsClient {
   /**
    * Resolve a secret by key. Resolution order:
    * 1. process.env[opts.env] if opts.env is set
-   * 2. OS keychain (macOS: security / Linux: secret-tool)
-   * 3. Interactive prompt (only if opts.promptIfMissing === true)
+   * 2. `gh auth token` if opts.ghCLI is set
+   * 3. opts.cliToken argv (trimmed stdout) if set
+   * 4. OS keychain (macOS: security / Linux: secret-tool)
+   * 5. Interactive prompt (only if opts.promptIfMissing === true)
    * Throws if the secret cannot be resolved.
    */
   get(key: string, opts?: GetSecretOptions): Promise<string>;
@@ -79,9 +88,12 @@ async function keychainSet(key: string, value: string): Promise<void> {
   }
 }
 
-async function ghCLIToken(): Promise<string | undefined> {
+// Runs an argv and returns trimmed stdout as a token, or undefined if the
+// command is missing, exits non-zero, or prints nothing.
+async function spawnToken(argv: string[]): Promise<string | undefined> {
+  if (argv.length === 0) return undefined;
   try {
-    const proc = Bun.spawn(["gh", "auth", "token"], {
+    const proc = Bun.spawn(argv, {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -90,9 +102,13 @@ async function ghCLIToken(): Promise<string | undefined> {
     const out = await new Response(proc.stdout).text();
     return out.trim() || undefined;
   } catch {
-    // gh not installed
+    // command not found / not executable
   }
   return undefined;
+}
+
+function ghCLIToken(): Promise<string | undefined> {
+  return spawnToken(["gh", "auth", "token"]);
 }
 
 /**
@@ -135,6 +151,11 @@ export function createSecretsClient(): SecretsClient {
         if (val !== undefined) return val;
       }
 
+      if (opts.cliToken) {
+        const val = await spawnToken(opts.cliToken);
+        if (val !== undefined) return val;
+      }
+
       const fromKeychain = await keychainGet(key);
       if (fromKeychain !== undefined) return fromKeychain;
 
@@ -145,7 +166,9 @@ export function createSecretsClient(): SecretsClient {
       }
 
       throw new Error(
-        `Secret "${key}" not found${opts.ghCLI ? " (gh auth token returned nothing)" : ""} in env or keychain`,
+        `Secret "${key}" not found${opts.ghCLI ? " (gh auth token returned nothing)" : ""}${
+          opts.cliToken ? ` (cliToken \`${opts.cliToken.join(" ")}\` returned nothing)` : ""
+        } in env or keychain`,
       );
     },
 

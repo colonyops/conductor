@@ -53,6 +53,16 @@ export async function promptTrustApproval(
   let answer: string;
   if (readLineFn) {
     answer = await readLineFn(msg);
+  } else if (!process.stdin.isTTY) {
+    // No interactive terminal (e.g. running under systemd). A readline prompt
+    // here would block forever waiting on stdin that never arrives, wedging the
+    // daemon with no diagnostic. Fail closed: the plugin is left untrusted and
+    // skipped. Pre-pin it with `conductor plugins trust <path>` for headless use.
+    process.stderr.write(
+      `${reasonText} at ${pluginMeta.path} requires trust approval, but no TTY is attached. ` +
+        `Skipping. Run \`conductor plugins trust ${pluginMeta.path}\` to pre-approve it.\n`,
+    );
+    return false;
   } else {
     const rl = createInterface({
       input: process.stdin,
@@ -94,9 +104,23 @@ export interface PluginRegistration {
 
 export async function validatePluginSecrets(plugin: Plugin, secrets: SecretsClient): Promise<boolean> {
   if (!plugin.requiredSecrets?.length) return true;
-  for (const key of plugin.requiredSecrets) {
+  for (const required of plugin.requiredSecrets) {
+    // A bare string resolves keychain-only; the object form carries the same
+    // resolution options as ctx.secrets.get, so env/CLI-sourced secrets that
+    // exist (but aren't in the keychain) validate instead of being skipped.
+    const { key, opts } =
+      typeof required === "string"
+        ? { key: required, opts: undefined }
+        : {
+            key: required.key,
+            opts: {
+              ...(required.env !== undefined ? { env: required.env } : {}),
+              ...(required.ghCLI !== undefined ? { ghCLI: required.ghCLI } : {}),
+              ...(required.cliToken !== undefined ? { cliToken: required.cliToken } : {}),
+            },
+          };
     try {
-      await secrets.get(key);
+      await secrets.get(key, opts);
     } catch {
       return false;
     }
@@ -249,7 +273,16 @@ export async function loadPlugins(opts: {
 
     const http = createHttpClient(pluginLogger);
     const metrics = pluginMetrics.forPlugin(plugin.id);
-    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics };
+    const ctx = {
+      kv,
+      hive,
+      secrets,
+      scheduler,
+      logger: pluginLogger,
+      http,
+      metrics,
+      ...(entry.config !== undefined ? { config: entry.config } : {}),
+    };
 
     try {
       await Promise.race([
