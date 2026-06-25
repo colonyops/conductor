@@ -32,6 +32,27 @@ describe("createSecretsClient", () => {
     });
   });
 
+  describe("onResolve metrics hook", () => {
+    afterEach(() => {
+      process.env.MY_SECRET = undefined;
+    });
+
+    it("reports the env backend on success", async () => {
+      process.env.MY_SECRET = "env-value";
+      const calls: Array<[string, string]> = [];
+      const client = createSecretsClient({ onResolve: (backend, result) => calls.push([backend, result]) });
+      await client.get("test.key", { env: "MY_SECRET" });
+      expect(calls).toEqual([["env", "ok"]]);
+    });
+
+    it("reports unresolved/error when no backend produces a value", async () => {
+      const calls: Array<[string, string]> = [];
+      const client = createSecretsClient({ onResolve: (backend, result) => calls.push([backend, result]) });
+      await expect(client.get("missing", { env: "CONDUCTOR_TEST_MISSING_12345" })).rejects.toThrow();
+      expect(calls).toEqual([["unresolved", "error"]]);
+    });
+  });
+
   describe("concurrent interactive prompts", () => {
     it("serializes stdin so concurrent prompts do not cross-talk", async () => {
       // keychainGet / keychainSet both go through Bun.spawn; make every spawn

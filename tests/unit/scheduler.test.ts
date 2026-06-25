@@ -132,6 +132,39 @@ describe("createScheduler", () => {
     });
   });
 
+  describe("onRun metrics hook", () => {
+    it("reports interval runs with their job type, even when fn throws", async () => {
+      const runs: Array<{ jobType: string; durationMs: number }> = [];
+      const scheduler = createScheduler(noopLogger, {
+        onRun: (jobType, durationMs) => runs.push({ jobType, durationMs }),
+      });
+      const handle = scheduler.interval(10_000, async () => {
+        throw new Error("boom");
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      handle.cancel();
+
+      expect(runs.length).toBeGreaterThanOrEqual(1);
+      expect(runs[0]?.jobType).toBe("interval");
+      expect(runs[0]?.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("reports scheduled runs with job type 'schedule'", async () => {
+      const frozen = new Date(2026, 0, 1, 10, 0, 59, 950);
+      setSystemTime(frozen);
+      const runs: string[] = [];
+      const scheduler = createScheduler(noopLogger, {
+        onRun: (jobType) => runs.push(jobType),
+      });
+      const handle = scheduler.schedule(["10:01"], async () => {});
+      await new Promise((r) => setTimeout(r, 250));
+      handle.cancel();
+
+      expect(runs.length).toBeGreaterThanOrEqual(1);
+      expect(runs.every((t) => t === "schedule")).toBe(true);
+    });
+  });
+
   describe("cancelAll", () => {
     it("cancels all registered jobs", async () => {
       const scheduler = createScheduler(noopLogger);

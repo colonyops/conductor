@@ -477,7 +477,9 @@ export class SessionManager {
       });
       try {
         await hiveRecycle(id);
+        this.metrics?.sessionsReaped.inc({ plugin_id: opts.pluginId, result: "ok" });
       } catch (recycleErr) {
+        this.metrics?.sessionsReaped.inc({ plugin_id: opts.pluginId, result: "error" });
         this.logger?.warn("failed to recycle session after trust failure", {
           sessionId: id,
           error: recycleErr instanceof Error ? recycleErr.message : String(recycleErr),

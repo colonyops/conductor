@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Registry } from "prom-client";
 import type { ConductorConfig } from "../../src/config.js";
 import { EventBus } from "../../src/core/events.js";
-import { createPluginMetricsFactory } from "../../src/core/observability.js";
+import { createMetrics, createPluginMetricsFactory } from "../../src/core/observability.js";
 import { SessionManager } from "../../src/core/session.js";
 import { loadPlugins } from "../../src/plugins/loader.js";
 import { createConcurrencyLimiter } from "../../src/sdk/concurrency.js";
@@ -53,6 +53,17 @@ function writePluginFixture(dir: string, markerPath: string): string {
   return file;
 }
 
+// Writes a plugin whose init() throws, to exercise the error path.
+function writeThrowingPluginFixture(dir: string): string {
+  const file = join(dir, "throwing.plugin.ts");
+  const source = [
+    `export default { id: "throwing", name: "Throwing", init: async () => { throw new Error("init boom"); } };`,
+    "",
+  ].join("\n");
+  writeFileSync(file, source);
+  return file;
+}
+
 function makeConfig(pluginPath: string, trusted: Record<string, string> = {}): ConductorConfig {
   return {
     plugins: [{ path: pluginPath, enabled: true }],
@@ -84,6 +95,7 @@ function makeOpts(config: ConductorConfig, configPath: string, dataDir: string, 
   });
   const kvDatabase = openKVDatabase(dataDir);
   const pluginMetrics = createPluginMetricsFactory(new Registry());
+  const { metrics } = createMetrics();
   return {
     opts: {
       config,
@@ -92,11 +104,13 @@ function makeOpts(config: ConductorConfig, configPath: string, dataDir: string, 
       eventBus,
       kvDatabase,
       pluginMetrics,
+      metrics,
       secrets: noopSecrets,
       globalLogger: logger,
       readLineFn: async () => answer,
     },
     kvDatabase,
+    metrics,
   };
 }
 
@@ -160,5 +174,39 @@ describe("loadPlugins trust gating", () => {
     expect(prompted).toBe(false);
     expect(existsSync(marker)).toBe(true);
     expect(registrations).toHaveLength(1);
+  });
+});
+
+describe("loadPlugins init metrics", () => {
+  it("records init duration when a plugin loads successfully", async () => {
+    const dir = tmpDir();
+    const marker = join(dir, "executed.marker");
+    const pluginPath = writePluginFixture(dir, marker);
+    const configPath = join(dir, "conductor.config.json");
+    const config = makeConfig(pluginPath);
+
+    const { opts, metrics } = makeOpts(config, configPath, dir, "y");
+    await loadPlugins(opts);
+
+    const data = await metrics.pluginInitDuration.get();
+    const count = data.values.find((v) => v.metricName?.endsWith("_count"));
+    expect(count?.value).toBeGreaterThanOrEqual(1);
+    expect(count?.labels.plugin_id).toBe("side-effect");
+  });
+
+  it("records a plugin error tagged 'init' when init throws", async () => {
+    const dir = tmpDir();
+    const pluginPath = writeThrowingPluginFixture(dir);
+    const configPath = join(dir, "conductor.config.json");
+    const config = makeConfig(pluginPath);
+
+    const { opts, metrics } = makeOpts(config, configPath, dir, "y");
+    const registrations = await loadPlugins(opts);
+
+    expect(registrations).toHaveLength(0);
+    const data = await metrics.pluginErrors.get();
+    const errEntry = data.values.find((v) => v.labels.type === "init");
+    expect(errEntry?.value).toBe(1);
+    expect(errEntry?.labels.plugin_id).toBe("throwing");
   });
 });

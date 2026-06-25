@@ -21,6 +21,18 @@ export interface SecretsClient {
   set(key: string, value: string): Promise<void>;
 }
 
+/** Source that satisfied (or failed to satisfy) a secret lookup. */
+export type SecretBackend = "env" | "gh-cli" | "keychain" | "prompt" | "unresolved";
+
+export interface SecretsClientOptions {
+  /**
+   * Called once per get() with the backend that resolved the secret (result
+   * "ok") or "unresolved"/"error" when no backend produced a value. Used to feed
+   * resolution metrics without coupling this module to a metrics library.
+   */
+  onResolve?: (backend: SecretBackend, result: "ok" | "error") => void;
+}
+
 async function keychainGet(key: string): Promise<string | undefined> {
   try {
     if (process.platform === "darwin") {
@@ -122,28 +134,41 @@ async function promptStdin(key: string): Promise<string> {
   return result;
 }
 
-export function createSecretsClient(): SecretsClient {
+export function createSecretsClient(clientOpts: SecretsClientOptions = {}): SecretsClient {
+  const recordResolved = (backend: SecretBackend) => clientOpts.onResolve?.(backend, "ok");
+
   return {
     async get(key, opts = {}) {
       if (opts.env) {
         const val = process.env[opts.env];
-        if (val) return val;
+        if (val) {
+          recordResolved("env");
+          return val;
+        }
       }
 
       if (opts.ghCLI) {
         const val = await ghCLIToken();
-        if (val !== undefined) return val;
+        if (val !== undefined) {
+          recordResolved("gh-cli");
+          return val;
+        }
       }
 
       const fromKeychain = await keychainGet(key);
-      if (fromKeychain !== undefined) return fromKeychain;
+      if (fromKeychain !== undefined) {
+        recordResolved("keychain");
+        return fromKeychain;
+      }
 
       if (opts.promptIfMissing) {
         const val = await promptStdin(key);
         await keychainSet(key, val);
+        recordResolved("prompt");
         return val;
       }
 
+      clientOpts.onResolve?.("unresolved", "error");
       throw new Error(
         `Secret "${key}" not found${opts.ghCLI ? " (gh auth token returned nothing)" : ""} in env or keychain`,
       );

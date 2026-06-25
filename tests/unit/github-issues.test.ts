@@ -296,6 +296,10 @@ describe("github-issues lifecycle", () => {
       await failing.runPoll();
 
       expect(failing.metricEvents.sessions_created_total).toContainEqual({ op: "inc", labels: { result: "error" } });
+      // The issue is not counted as seen when its session never started — the
+      // marker is dropped and the issue is retried next poll, so counting it
+      // here would double-count.
+      expect(failing.metricEvents.issues_seen_total).toEqual([]);
       // The poll itself still completes successfully.
       expect(failing.metricEvents.polls_total).toContainEqual({ op: "inc", labels: { result: "ok" } });
     } finally {

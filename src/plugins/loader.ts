@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { type ConductorConfig, resolvePath, writeConfig } from "../config.js";
 import type { EventBus } from "../core/events.js";
-import type { PluginMetricsFactory } from "../core/observability.js";
+import type { ConductorMetrics, PluginMetricsFactory } from "../core/observability.js";
 import type { SessionManager } from "../core/session.js";
 import { createHiveClient } from "../sdk/hive.js";
 import type { HiveClient } from "../sdk/hive.js";
@@ -136,15 +136,61 @@ export async function loadPlugins(opts: {
   eventBus: EventBus;
   kvDatabase: ReturnType<typeof openKVDatabase>;
   pluginMetrics: PluginMetricsFactory;
+  metrics: ConductorMetrics;
   secrets: SecretsClient;
   globalLogger: Logger;
   readLineFn?: (question: string) => Promise<string>;
 }): Promise<PluginRegistration[]> {
-  const { config, configPath, sessionManager, eventBus, kvDatabase, pluginMetrics, secrets, globalLogger, readLineFn } =
-    opts;
+  const {
+    config,
+    configPath,
+    sessionManager,
+    eventBus,
+    kvDatabase,
+    pluginMetrics,
+    metrics,
+    secrets,
+    globalLogger,
+    readLineFn,
+  } = opts;
 
   const registrations: PluginRegistration[] = [];
   const approvals: Array<{ trustKey: string; hash: string }> = [];
+
+  // A scheduler whose runs feed the per-plugin scheduler metrics.
+  const schedulerFor = (pluginId: string, pluginLogger: Logger) =>
+    createScheduler(pluginLogger, {
+      onRun: (jobType, durationMs) => {
+        metrics.schedulerRuns.inc({ plugin_id: pluginId, job_type: jobType });
+        metrics.schedulerRunDuration.observe({ plugin_id: pluginId, job_type: jobType }, durationMs);
+      },
+    });
+
+  // Runs plugin.init() under the shared timeout, recording init duration on
+  // success and an error metric (tagged init vs init_timeout) on failure. The
+  // init promise is passed already-started so timing covers the same window the
+  // timeout races against.
+  const runInit = async (
+    pluginId: string,
+    init: Promise<void>,
+  ): Promise<{ ok: true } | { ok: false; timedOut: boolean; msg: string }> => {
+    const start = Date.now();
+    try {
+      await Promise.race([
+        init,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`)), INIT_TIMEOUT_MS),
+        ),
+      ]);
+      metrics.pluginInitDuration.observe({ plugin_id: pluginId }, Date.now() - start);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const timedOut = msg.includes("timed out");
+      metrics.pluginErrors.inc({ plugin_id: pluginId, type: timedOut ? "init_timeout" : "init" });
+      return { ok: false, timedOut, msg };
+    }
+  };
 
   type Evaluated = {
     entry: ConductorConfig["plugins"][number];
@@ -236,7 +282,7 @@ export async function loadPlugins(opts: {
     }
 
     const pluginLogger = globalLogger.with({ component: plugin.name });
-    const scheduler = createScheduler(pluginLogger);
+    const scheduler = schedulerFor(plugin.id, pluginLogger);
     const kv: KVStore = kvDatabase.forPlugin(plugin.id);
     const unsubscribes: Array<() => void> = [];
     const baseHive = createHiveClient({
@@ -248,24 +294,17 @@ export async function loadPlugins(opts: {
     const hive = makeTrackingHiveClient(baseHive, unsubscribes);
 
     const http = createHttpClient(pluginLogger);
-    const metrics = pluginMetrics.forPlugin(plugin.id);
-    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics };
+    const pluginMetricsFacade = pluginMetrics.forPlugin(plugin.id);
+    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics: pluginMetricsFacade };
 
-    try {
-      await Promise.race([
-        plugin.init(ctx),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`)), INIT_TIMEOUT_MS),
-        ),
-      ]);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("timed out")) {
+    const initResult = await runInit(plugin.id, plugin.init(ctx));
+    if (!initResult.ok) {
+      if (initResult.timedOut) {
         globalLogger.error("Plugin init timed out", { plugin: plugin.name });
       } else {
         globalLogger.error("Plugin init threw", {
           plugin: plugin.name,
-          error: msg,
+          error: initResult.msg,
         });
       }
       scheduler.cancelAll();
@@ -305,7 +344,7 @@ export async function loadPlugins(opts: {
 
     const plugin = builtinModule.createGitHubIssuesPlugin(giConfig);
     const pluginLogger = globalLogger.with({ component: plugin.name });
-    const scheduler = createScheduler(pluginLogger);
+    const scheduler = schedulerFor(plugin.id, pluginLogger);
     const kv: KVStore = kvDatabase.forPlugin(plugin.id);
     const unsubscribes: Array<() => void> = [];
     const baseHive = createHiveClient({
@@ -315,19 +354,12 @@ export async function loadPlugins(opts: {
     });
     const hive = makeTrackingHiveClient(baseHive, unsubscribes);
     const http = createHttpClient(pluginLogger);
-    const metrics = pluginMetrics.forPlugin(plugin.id);
-    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics };
+    const pluginMetricsFacade = pluginMetrics.forPlugin(plugin.id);
+    const ctx = { kv, hive, secrets, scheduler, logger: pluginLogger, http, metrics: pluginMetricsFacade };
 
-    try {
-      await Promise.race([
-        plugin.init(ctx),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`plugin init timed out after ${INIT_TIMEOUT_MS}ms`)), INIT_TIMEOUT_MS),
-        ),
-      ]);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      globalLogger.error("Builtin github-issues init failed", { error: msg });
+    const initResult = await runInit(plugin.id, plugin.init(ctx));
+    if (!initResult.ok) {
+      globalLogger.error("Builtin github-issues init failed", { error: initResult.msg });
       scheduler.cancelAll();
       pluginMetrics.removePlugin(plugin.id);
       return registrations;

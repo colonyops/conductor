@@ -507,12 +507,20 @@ program
         caller: config.observability.logCaller,
       });
       const kvDatabase = openKVDatabase(conductorDataDir());
-      const secrets = createSecretsClient();
       const eventBus = new EventBus(logger.with({ component: "eventbus" }));
-      const globalLimiter = createConcurrencyLimiter(config.concurrency.global);
 
       const { registry, metrics, pluginMetrics } = createMetrics();
       const metricsServer = startMetricsServer(config.observability.metricsPort, registry);
+
+      const secrets = createSecretsClient({
+        onResolve: (backend, result) => metrics.secretsResolutionTotal.inc({ backend, result }),
+      });
+      const globalLimiter = createConcurrencyLimiter(config.concurrency.global, {
+        onChange: (active, waiting) => {
+          metrics.concurrencyActive.set({ scope: "global" }, active);
+          metrics.concurrencyWaiting.set({ scope: "global" }, waiting);
+        },
+      });
 
       const sessionManager = new SessionManager({
         config,
@@ -545,6 +553,7 @@ program
         eventBus,
         kvDatabase,
         pluginMetrics,
+        metrics,
         secrets,
         globalLogger: logger,
       });

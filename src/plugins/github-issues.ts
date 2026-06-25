@@ -235,17 +235,17 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
         }
       }
 
+      const countOpenSessions = (): number => hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length;
+
       async function pollOnce(): Promise<void> {
         const issues = await fetchIssues(token, repo, labels, assignee, () => rateLimited.inc());
-
-        openSessions.set(hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length);
 
         for (const issue of issues) {
           const seenKey = `seen:${issue.id}`;
           if (await kv.has(seenKey)) continue;
 
           if (maxOpenSessions !== undefined) {
-            const openCount = hive.listSessions().filter((s) => s.pluginId === PLUGIN_ID).length;
+            const openCount = countOpenSessions();
             if (openCount >= maxOpenSessions) {
               logger.info("GitHub Issues: max open sessions reached, deferring issue", {
                 issueNumber: issue.number,
@@ -256,7 +256,6 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
             }
           }
 
-          issuesSeen.inc();
           logger.info("GitHub Issues: new issue found, creating session", {
             issueNumber: issue.number,
             title: issue.title,
@@ -279,6 +278,10 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
             });
             sessionId = session.id;
             sessionsCreated.inc({ result: "ok" });
+            // Count the issue as seen only once a session actually started. A
+            // failed attempt deletes the "seen:" marker and is retried next
+            // poll, so incrementing before this point double-counts retries.
+            issuesSeen.inc();
           } catch (err) {
             sessionsCreated.inc({ result: "error" });
             // Remove the marker so a transient failure can be retried next poll.
@@ -314,6 +317,10 @@ export function createGitHubIssuesPlugin(config: GitHubIssuesBuiltinConfig): Plu
             }
           }
         }
+
+        // Refresh after the creation loop so the gauge reflects sessions created
+        // this poll, not the stale pre-poll snapshot.
+        openSessions.set(countOpenSessions());
       }
 
       scheduler.interval(pollIntervalMs, poll);
