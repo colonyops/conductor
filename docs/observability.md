@@ -54,7 +54,7 @@ All metrics use a `conductor_` prefix.
 | `conductor_plugin_init_duration_ms` | Histogram | `plugin_id` |
 | `conductor_plugin_errors_total` | Counter | `plugin_id`, `type` |
 
-Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
+Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`. `conductor_plugin_init_duration_ms` records once per plugin whose `init()` resolves within the 30s timeout. `conductor_plugin_errors_total` `type` values: `init` (init threw) / `init_timeout` (init exceeded the timeout).
 
 #### Scheduler
 
@@ -63,7 +63,7 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 | `conductor_scheduler_runs_total` | Counter | `plugin_id`, `job_type` |
 | `conductor_scheduler_run_duration_ms` | Histogram | `plugin_id`, `job_type` |
 
-`job_type` is `interval` or `daily`. Duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 30000, 60000`.
+`job_type` is `interval` (from `scheduler.interval()`) or `schedule` (from the daily `scheduler.schedule()`). Both metrics record once per job invocation, whether the job resolved or threw. Duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 30000, 60000`.
 
 #### IPC signals
 
@@ -80,7 +80,7 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 | `conductor_concurrency_active` | Gauge | `scope` |
 | `conductor_concurrency_waiting` | Gauge | `scope` |
 
-`scope` is `"global"` for the daemon-wide limit or the plugin `id` for per-plugin limits.
+`scope` is `"global"` for the daemon-wide limit. Both gauges are mirrored from the limiter on every acquire/release, so they reflect live state.
 
 #### Secrets
 
@@ -88,9 +88,7 @@ Init duration buckets (ms): `10, 50, 100, 500, 1000, 5000, 10000, 30000`.
 |---|---|---|
 | `conductor_secrets_resolution_total` | Counter | `backend`, `result` |
 
-`backend` values: `env`, `keychain`, `stdin`. `result` values: `hit`, `miss`.
-
-> The session, signal, and IPC metrics above are live. `conductor_concurrency_*`, `conductor_plugin_*`, `conductor_scheduler_*`, and `conductor_secrets_*` are defined but not yet fully instrumented and may report zero values.
+Recorded once per `secrets.get()`. `backend` is the source that satisfied the lookup — `env`, `gh-cli`, `keychain`, `prompt` — paired with `result="ok"`, or `unresolved` with `result="error"` when no source produced a value.
 
 ---
 

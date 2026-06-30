@@ -79,4 +79,23 @@ describe("createConcurrencyLimiter", () => {
     r3();
     expect(limiter.active).toBe(0);
   });
+
+  it("reports active/waiting to onChange on every mutation", async () => {
+    const changes: Array<[number, number]> = [];
+    const limiter = createConcurrencyLimiter(1, { onChange: (active, waiting) => changes.push([active, waiting]) });
+
+    const r1 = await limiter.acquire(); // active 1
+    const p2 = limiter.acquire(); // queued: waiting 1
+    await new Promise((r) => setTimeout(r, 0));
+    r1(); // release: dequeues p2 → active 1, waiting 0
+    const r2 = await p2;
+    r2(); // active 0
+
+    expect(changes).toEqual([
+      [1, 0], // acquire grants immediately
+      [1, 1], // second acquire queues
+      [1, 0], // release hands the slot to the queued waiter
+      [0, 0], // final release
+    ]);
+  });
 });

@@ -22,6 +22,18 @@ export interface Scheduler {
   cancelAll(): void;
 }
 
+export type SchedulerJobType = "interval" | "schedule";
+
+export interface SchedulerOptions {
+  /**
+   * Called after each job invocation completes (whether it resolved or threw),
+   * with the job type and its wall-clock duration in milliseconds. Used to feed
+   * run-count and duration metrics without coupling this module to a metrics
+   * library.
+   */
+  onRun?: (jobType: SchedulerJobType, durationMs: number) => void;
+}
+
 /** Returns milliseconds until the next occurrence of HH:MM (local time). */
 function msUntilNext(hhmm: string): number {
   const parts = hhmm.split(":");
@@ -41,8 +53,19 @@ function msUntilNext(hhmm: string): number {
   return next.getTime() - now.getTime();
 }
 
-export function createScheduler(logger: Logger): Scheduler {
+export function createScheduler(logger: Logger, schedulerOpts: SchedulerOptions = {}): Scheduler {
   const handles: SchedulerHandle[] = [];
+
+  // Times fn(), reporting the wall-clock duration to onRun regardless of whether
+  // fn resolved or threw — the job executed either way.
+  async function timedRun(jobType: SchedulerJobType, fn: () => Promise<void>): Promise<void> {
+    const start = Date.now();
+    try {
+      await fn();
+    } finally {
+      schedulerOpts.onRun?.(jobType, Date.now() - start);
+    }
+  }
 
   function interval(intervalMs: number, fn: () => Promise<void>, opts: { immediate?: boolean } = {}): SchedulerHandle {
     const { immediate = true } = opts;
@@ -52,7 +75,7 @@ export function createScheduler(logger: Logger): Scheduler {
     const run = async () => {
       if (cancelled) return;
       try {
-        await fn();
+        await timedRun("interval", fn);
       } catch (err) {
         logger.error("scheduler: interval job threw", {
           error: err instanceof Error ? err.message : String(err),
@@ -99,7 +122,7 @@ export function createScheduler(logger: Logger): Scheduler {
         timers.delete(timer);
         if (cancelled) return;
         try {
-          await fn();
+          await timedRun("schedule", fn);
         } catch (err) {
           logger.error("scheduler: scheduled job threw", {
             time: hhmm,
